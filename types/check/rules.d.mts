@@ -104,6 +104,21 @@ export function checkHandRolledTooltip(source: any): {
     line: number;
     message: string;
 }[];
+/** Hand-rolled `<details>` disclosures duplicate Disclosure, which adds
+ * the chevron, focus ring, deep-link anchors, and Accordion grouping on
+ * the same native element. Matches the opening tag only. */
+export function checkHandRolledDisclosure(source: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
+/** Hand-rolled tab strips duplicate Tabs. role="tablist" is the reliable
+ * marker: a conformant custom tab strip must carry it. */
+export function checkHandRolledTabs(source: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
 /** Hand-rolled bottom status bars duplicate StatusBar. Matches the class
  * name both apps converged on; kit-status-bar (the library's own class,
  * e.g. in retheming CSS) is exempt. */
@@ -116,6 +131,14 @@ export function checkHandRolledStatusBar(source: any): {
  * both apps' AppHeaders converged on (app-header / header-left /
  * header-right); kit-top-bar is exempt. */
 export function checkHandRolledTopBar(source: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
+/** Hand-rolled page headers duplicate PageHeader, and the copies tend to draw
+ * a rule under the title that doubles with the first bordered block below.
+ * Matches page-header / page-heading class names; kit-page-header is exempt. */
+export function checkHandRolledPageHeader(source: any): {
     rule: string;
     line: number;
     message: string;
@@ -136,7 +159,8 @@ export function checkHandRolledCodeBlock(source: any): {
     line: number;
     message: string;
 }[];
-/** Hand-rolled empty/placeholder states duplicate EmptyState. */
+/** Hand-rolled empty/placeholder states duplicate EmptyState. `missing-data`
+ * is the name such a block often has for a whole page. */
 export function checkHandRolledEmptyState(source: any): {
     rule: string;
     line: number;
@@ -150,6 +174,11 @@ export function checkHandRolledImagePreview(source: any): {
     line: number;
     message: string;
 }[];
+export function checkHandRolledVideoPlayer(source: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
 export function checkHandRolledLightbox(source: any, filename?: string): {
     rule: string;
     line: number;
@@ -157,6 +186,17 @@ export function checkHandRolledLightbox(source: any, filename?: string): {
 }[];
 /** Custom sortable table headers duplicate TableHeaderCell. */
 export function checkHandRolledTableSort(source: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
+/** Every table with a header must sort. A labeled TableHeaderCell needs
+ * `sort={…} column="…"` (TableSort) or `sortable`; a raw `<th>` with visible
+ * text cannot sort at all. The one exception is a `<Table unsorted>` (or
+ * `<VirtualTable unsorted>`), which opts out explicitly. Headers with no
+ * visible text (a checkbox or actions column) and row headers
+ * (`scope="row"`) are exempt. */
+export function checkUnsortedTableHeader(source: any, filename: any): {
     rule: string;
     line: number;
     message: string;
@@ -176,6 +216,20 @@ export function checkHandRolledDateInput(source: any): {
     line: number;
     message: string;
 }[];
+/** Native number inputs duplicate NumberInput: they render platform
+ * spinner buttons and size themselves apart from the other fields. */
+export function checkHandRolledNumberInput(source: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
+/** Native color inputs render unthemed platform chrome and offer no hex
+ * entry or quick picks. */
+export function checkHandRolledColorInput(source: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
 /** Hand-rolled toasts/snackbars duplicate FlashBanner + the flash store.
  * \b also matches inside compounds like undo-toast. */
 export function checkHandRolledToast(source: any): {
@@ -184,8 +238,9 @@ export function checkHandRolledToast(source: any): {
     message: string;
 }[];
 /** Hand-rolled slide-in drawers and explicit inline bottom-panel patterns
- * duplicate DetailDrawer or BottomDock. Other drawer-* and generic dock names
- * are left alone; kit component classes are exempt. */
+ * duplicate DetailDrawer, BottomDock or, for app navigation, AppSidebar. Other
+ * drawer-* and generic dock names are left alone; kit component classes are
+ * exempt. */
 export function checkHandRolledDrawer(source: any): {
     rule: string;
     line: number;
@@ -210,13 +265,15 @@ export function checkHandRolledSidebarToggle(source: any): {
     line: number;
     message: string;
 }[];
-/** Raw native checkboxes (bare markup, input[type=checkbox] selectors, or
- * checkbox-scoped accent-color styling) duplicate Checkbox/Toggle.
- * accent-color on OTHER controls (range sliders, progress) is legitimate —
- * theme.css sets it globally — so the CSS signal requires a selector that
- * names checkboxes. kit-ui's own Markdown component already styles
- * rendered task-list checkboxes. */
+/** Raw native checkboxes duplicate Checkbox/Toggle. kit-ui's own Markdown
+ * component already styles rendered task-list checkboxes. */
 export function checkHandRolledCheckbox(source: any, filename: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
+/** Raw native radios duplicate RadioGroup. */
+export function checkHandRolledRadio(source: any, filename: any): {
     rule: string;
     line: number;
     message: string;
@@ -337,6 +394,23 @@ export function checkSplitHandleOverride(source: any, filename: any): {
     line: number;
     message: string;
 }[];
+/**
+ * A side stripe is a colored bar on one edge of a box: a side border of 2px
+ * or more, or an inset box-shadow offset only sideways by 2px or more. On a
+ * square edge it is fine. On a rounded edge it bends around the corners.
+ *
+ * A stripe passes when, for each selector in its rule's selector list, rules
+ * in this file for that selector square both corners on the stripe's side.
+ * Media queries and other conditions are not modeled: a square corner in any
+ * of them counts. A radius set elsewhere, by another selector or a component,
+ * cannot be seen here, so it counts as rounded. Quotations keep their side
+ * border.
+ */
+export function checkRoundedSideStripe(source: any, filename: any): {
+    rule: string;
+    line: number;
+    message: string;
+}[];
 /** Run all (or the selected) rules on one file's source. */
 export function checkSource(source: any, filename: any, ruleNames?: string[]): any[];
 /**
@@ -366,7 +440,10 @@ export const ALL_RULES: {
     "hand-rolled-splitter": typeof checkHandRolledSplitter;
     "hand-rolled-segmented": typeof checkHandRolledSegmented;
     "hand-rolled-table-sort": typeof checkHandRolledTableSort;
+    "unsorted-table-header": typeof checkUnsortedTableHeader;
     "hand-rolled-tooltip": typeof checkHandRolledTooltip;
+    "hand-rolled-disclosure": typeof checkHandRolledDisclosure;
+    "hand-rolled-tabs": typeof checkHandRolledTabs;
     "hand-rolled-popover-card": typeof checkHandRolledPopoverCard;
     "hand-rolled-card": typeof checkHandRolledCard;
     "hand-rolled-status-bar": typeof checkHandRolledStatusBar;
@@ -375,14 +452,19 @@ export const ALL_RULES: {
     "hand-rolled-icon-button": typeof checkHandRolledIconButton;
     "hand-rolled-image-preview": typeof checkHandRolledImagePreview;
     "hand-rolled-lightbox": typeof checkHandRolledLightbox;
+    "hand-rolled-video-player": typeof checkHandRolledVideoPlayer;
     "hand-rolled-top-bar": typeof checkHandRolledTopBar;
+    "hand-rolled-page-header": typeof checkHandRolledPageHeader;
     "hand-rolled-search-input": typeof checkHandRolledSearchInput;
     "hand-rolled-date-input": typeof checkHandRolledDateInput;
+    "hand-rolled-number-input": typeof checkHandRolledNumberInput;
+    "hand-rolled-color-input": typeof checkHandRolledColorInput;
     "hand-rolled-toast": typeof checkHandRolledToast;
     "hand-rolled-drawer": typeof checkHandRolledDrawer;
     "hand-rolled-find-bar": typeof checkHandRolledFindBar;
     "hand-rolled-status-dot": typeof checkHandRolledStatusDot;
     "hand-rolled-checkbox": typeof checkHandRolledCheckbox;
+    "hand-rolled-radio": typeof checkHandRolledRadio;
     "hand-rolled-toggle": typeof checkHandRolledToggle;
     "hand-rolled-sidebar-toggle": typeof checkHandRolledSidebarToggle;
     "hand-rolled-sr-only": typeof checkHandRolledSrOnly;
@@ -400,4 +482,5 @@ export const ALL_RULES: {
     "legacy-svelte": typeof checkLegacySvelte;
     "chip-label-override": typeof checkChipLabelOverride;
     "split-handle-override": typeof checkSplitHandleOverride;
+    "rounded-side-stripe": typeof checkRoundedSideStripe;
 };

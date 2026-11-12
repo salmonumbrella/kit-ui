@@ -152,9 +152,12 @@
     --kit-card-shadow: none;
   }
 
+  /* --card-border (theme.css) sits midway between the muted and default
+   * borders in light, where the surface sits close to the page and a muted
+   * edge vanished. It is the muted border in dark. */
   .kit-card--default {
     --kit-card-bg: var(--bg-surface);
-    --kit-card-border: var(--border-muted);
+    --kit-card-border: var(--card-border);
     --kit-card-radius: var(--radius-md);
     --kit-card-shadow: none;
   }
@@ -163,7 +166,7 @@
     --kit-card-bg: var(--bg-surface);
     --kit-card-border: var(--border-default);
     --kit-card-radius: var(--radius-lg);
-    --kit-card-shadow: var(--shadow-sm);
+    --kit-card-shadow: var(--shadow-panel, var(--shadow-sm));
   }
 
   .kit-card--pad-none {
@@ -281,6 +284,15 @@
 
   .kit-card__body {
     min-width: 0;
+  }
+
+  /* A table that ends a flush card's body sits on the card's bottom border,
+   * or on the footer's divider. Its last row's rule would run just above that
+   * edge as a second line. */
+  .kit-card--pad-none
+    > .kit-card__body
+    > :global(.kit-table-wrapper:last-child > .kit-table > tbody > tr:last-child > td) {
+    border-bottom: 0;
   }
 
   .kit-card__footer {

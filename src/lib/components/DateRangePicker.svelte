@@ -16,6 +16,7 @@
     resolveRange,
     todayStr,
     type CalendarNavLabels,
+    type WeekStart,
     type CalendarUnit,
     type DateRange,
     type RangeMode,
@@ -24,6 +25,8 @@
   } from "./date-range.js";
 
   interface Props extends CalendarNavLabels {
+    /** First weekday for calendar layout and week selection. */
+    weekStart?: WeekStart | undefined;
     selection: RangeSelection;
     onSelect: (selection: RangeSelection) => void;
     /** Dim the trigger while the consumer reloads data. */
@@ -89,6 +92,7 @@
     relativeGroupLabel = "Relative window",
     calendarGroupLabel = "Calendar period",
     locale = undefined,
+    weekStart = "monday",
     // Calendar's nav/drill-down labels, forwarded verbatim so Calendar's
     // own English defaults stay the single source.
     ...calendarLabels
@@ -142,7 +146,7 @@
     if (unit === "month") return formatMonthLabel(anchor, locale);
     return formatWeekOfLabel(
       weekOfLabel,
-      formatShortDate(periodBounds("week", anchor).from, locale),
+      formatShortDate(periodBounds("week", anchor, weekStart).from, locale),
     );
   }
 
@@ -163,7 +167,7 @@
 
   // The period the calendar highlights: the day/week/month around the
   // current anchor.
-  const calSelected = $derived(periodBounds(calUnit, calAnchor));
+  const calSelected = $derived(periodBounds(calUnit, calAnchor, weekStart));
 
   // While an end pick is pending only the start day highlights.
   const calCustomSelected = $derived<DateRange | null>(
@@ -195,7 +199,7 @@
       calUnit = "week";
       calAnchor = selection.mode === "custom" && selection.to ? selection.to : todayStr();
     }
-    const resolved = resolveRange(selection, earliestDate);
+    const resolved = resolveRange(selection, earliestDate, weekStart);
     customFrom = selection.mode === "custom" ? selection.from : resolved.from;
     customTo = selection.mode === "custom" ? selection.to : resolved.to;
     // A controlled selection with only `from` is a range mid-pick: stay
@@ -250,7 +254,7 @@
   // so switching tabs after picking a preset edits that range, not a stale
   // seed.
   function syncCustomFields(sel: RangeSelection): void {
-    const resolved = resolveRange(sel, earliestDate);
+    const resolved = resolveRange(sel, earliestDate, weekStart);
     customFrom = resolved.from;
     customTo = resolved.to;
     customPending = false;
@@ -260,7 +264,7 @@
 
   function applyRelative(days: number): void {
     const sel: RangeSelection = { mode: "relative", days };
-    calAnchor = resolveRange(sel, earliestDate).to;
+    calAnchor = resolveRange(sel, earliestDate, weekStart).to;
     syncCustomFields(sel);
     onSelect(sel);
   }
@@ -411,6 +415,7 @@
             {maxDate}
             {...calendarLabels}
             {locale}
+            {weekStart}
             onpick={(date) => applyCalendar(calUnit, date)}
           />
         </div>
@@ -443,6 +448,7 @@
             {maxDate}
             {...calendarLabels}
             {locale}
+            {weekStart}
             onpick={pickCustomDay}
           />
         </div>
@@ -542,34 +548,99 @@
     margin-bottom: var(--space-4);
   }
 
+  /* Two tiers of one choice. The mode tabs are the primary control; the
+   * chosen mode's options hang under them as a lower tier. The tier starts
+   * flush against the track's bottom edge with a straight, square top, and
+   * is inset so the track overhangs it on both sides. Its top row is one
+   * contact line across its full width, drawn over a quiet hairline ring so
+   * the top corners stay square (a border join would leave a blended corner
+   * pixel). Its fill, height, and type sit a step below the track; radii,
+   * flat options, and the shared selected pill match SegmentedControl. */
+  .kit-date-range-picker__tabs:has(+ .kit-date-range-picker__pills) {
+    margin-bottom: 0;
+  }
+
   .kit-date-range-picker__pills {
+    --kit-date-range-picker-presets-radius: var(--kit-control-radius, var(--radius-sm));
+    --kit-date-range-picker-presets-fill: color-mix(
+      in srgb,
+      var(--bg-inset) 68%,
+      var(--bg-popover, var(--bg-surface))
+    );
+    --kit-date-range-picker-presets-edge: color-mix(
+      in srgb,
+      var(--border-default) 50%,
+      var(--border-muted)
+    );
+    --kit-date-range-picker-presets-contact: color-mix(
+      in srgb,
+      var(--border-default) 75%,
+      var(--border-muted)
+    );
     display: flex;
-    gap: var(--space-2);
+    gap: 1px;
+    margin: 0 calc(var(--space-6) + 4px);
+    /* One pixel more above and below than the track, for the contact line
+     * and so tier fill shows around the chosen preset. */
+    padding: 3px;
+    border-radius: 0 0 var(--kit-date-range-picker-presets-radius)
+      var(--kit-date-range-picker-presets-radius);
+    background: var(--kit-date-range-picker-presets-fill);
+    /* The first shadow paints on top: the contact line covers the ring's
+     * top row, corners included. */
+    box-shadow:
+      inset 0 1px 0 var(--kit-date-range-picker-presets-contact),
+      inset 0 0 0 1px var(--kit-date-range-picker-presets-edge);
+  }
+
+  /* Dark: the tier sits a step above the near-black track with a quiet
+   * outline, and a near-black contact line shows the track resting on it. */
+  :global(:root.dark) .kit-date-range-picker__pills {
+    --kit-date-range-picker-presets-fill: color-mix(
+      in srgb,
+      var(--bg-inset) 35%,
+      var(--bg-popover, var(--bg-surface))
+    );
+    --kit-date-range-picker-presets-edge: color-mix(
+      in srgb,
+      var(--text-primary) 17%,
+      var(--bg-surface)
+    );
+    --kit-date-range-picker-presets-contact: color-mix(in srgb, #000 55%, transparent);
   }
 
   .kit-date-range-picker__pill {
     flex: 1;
-    height: 30px;
+    /* A floor, not a fixed height: the label is rem, so the touch scale or
+     * a larger browser font can outgrow 17px, and the option and its tier
+     * grow with it. No block padding, so the label alone decides when. */
+    min-height: 17px;
+    padding-block: 0;
     border: 0;
-    border-radius: var(--radius-md);
-    background: var(--bg-inset);
-    color: var(--text-secondary);
+    border-radius: max(0px, calc(var(--kit-date-range-picker-presets-radius) - 1px));
+    background: transparent;
+    /* The same ink as the unselected mode tabs. */
+    color: var(--text-muted);
     font-family: inherit;
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium, 500);
+    /* A step below the mode labels, so the shared selected pill on a
+     * preset still reads as the lesser choice. */
+    font-size: calc(var(--kit-control-font-size, var(--font-size-xs)) - 1px);
+    font-weight: 400;
     cursor: pointer;
     transition:
       background var(--transition-fast) var(--transition-ease, ease),
       color var(--transition-fast) var(--transition-ease, ease);
   }
 
-  .kit-date-range-picker__pill:hover {
-    background: var(--bg-surface-hover);
+  .kit-date-range-picker__pill:hover:not(.active) {
+    color: var(--text-primary);
   }
 
   .kit-date-range-picker__pill.active {
-    background: var(--accent-blue);
-    color: var(--accent-blue-foreground, #fff);
+    background: var(--selected-strong-bg);
+    color: var(--text-primary);
+    font-weight: var(--selected-strong-weight);
+    box-shadow: var(--shadow-raised, var(--selected-strong-edge));
   }
 
   .kit-date-range-picker__calendar {
@@ -592,8 +663,7 @@
     width: 100%;
   }
 
-  /* Sized like the pill rows above so the tabs read as one family; the
-   * accent border marks the endpoint the next calendar click sets. */
+  /* The accent border marks the endpoint the next calendar click sets. */
   .kit-date-range-picker__endpoint {
     flex: 1;
     box-sizing: border-box;

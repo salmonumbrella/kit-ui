@@ -10,8 +10,22 @@
     tone?: "neutral" | "danger";
     textValue?: string;
     class?: ClassValue;
-    /** Decorative leading icon. Its column stays reserved when absent or empty. */
-    icon?: Snippet;
+    /** Decorative leading icon. The icon column shows when any item in the menu passes one. */
+    icon?: Snippet | undefined;
+    /** Right-aligned secondary text, such as a count or a shortcut hint. */
+    trailing?: Snippet | undefined;
+    /**
+     * The shortcut the trailing hint shows, in `aria-keyshortcuts` form such as `F2` or
+     * `Meta+1`. Assistive technology reads the shortcut from this attribute, so the
+     * visual hint is left out of the item's name.
+     */
+    keyshortcuts?: string | undefined;
+    /**
+     * Makes the item a checkbox (`menuitemcheckbox`) with this checked state, for
+     * options that toggle on and off. Leave unset for a plain action. The item does
+     * not draw a check mark; pass one in `icon`.
+     */
+    checked?: boolean | undefined;
     children: Snippet;
   }
 
@@ -23,6 +37,9 @@
     textValue,
     class: className = "",
     icon,
+    trailing,
+    keyshortcuts,
+    checked,
     children,
   }: Props = $props();
 
@@ -47,9 +64,11 @@
   bind:this={element}
   class={["kit-menu__item", "kit-control-states", `kit-menu__item--${tone}`, className]}
   type="button"
-  role="menuitem"
+  role={checked === undefined ? "menuitem" : "menuitemcheckbox"}
+  aria-checked={checked}
   tabindex="-1"
   aria-disabled={disabled || undefined}
+  aria-keyshortcuts={keyshortcuts}
   onclick={(event) => {
     if (disabled) {
       event.preventDefault();
@@ -59,10 +78,15 @@
   }}
   onpointermove={() => element?.focus({ preventScroll: true })}
 >
-  <span class="kit-menu__icon" aria-hidden="true">
+  <span class="kit-menu__icon" data-filled={icon ? "" : undefined} aria-hidden="true">
     {@render icon?.()}
   </span>
   {@render children()}
+  {#if trailing}
+    <span class="kit-menu__trailing" aria-hidden={keyshortcuts ? "true" : undefined}>
+      {@render trailing()}
+    </span>
+  {/if}
 </button>
 
 <style>
@@ -73,6 +97,10 @@
     width: var(--menu-icon-width, 16px);
     height: var(--menu-icon-width, 16px);
     flex: 0 0 var(--menu-icon-width, 16px);
+  }
+
+  :global(.kit-menu__content:not(:has(.kit-menu__icon[data-filled]))) .kit-menu__icon {
+    display: none;
   }
 
   .kit-menu__item {
@@ -94,10 +122,37 @@
     cursor: pointer;
   }
 
-  .kit-menu__item:hover:not([aria-disabled="true"]),
+  /* A disabled item often carries its reason ("Import unavailable in
+     read-only mode"). Muted ink at full opacity keeps it clearly disabled
+     beside the secondary ink of enabled items while the reason stays
+     readable. The class repeats to beat the shared half-opacity dimming in
+     theme.css. */
+  .kit-menu__item.kit-menu__item[aria-disabled="true"] {
+    opacity: 1;
+    color: var(--text-muted);
+  }
+
+  /* Moving the pointer over an item focuses it, so focus alone drives the
+     fill. Filling on :hover too would leave two items lit when the pointer
+     rests on one and the arrow keys move to another. */
+  .kit-menu__item:focus:not([aria-disabled="true"]),
   .kit-menu__item:focus-visible {
     background: var(--bg-surface-hover);
     color: var(--text-primary);
+  }
+
+  /* The hover fill is too faint to mark keyboard focus alone, so keep the
+     ring, inset, so the active item reads as one block between separators. */
+  .kit-menu__item:focus-visible {
+    outline-offset: -2px;
+  }
+
+  .kit-menu__trailing {
+    margin-left: auto;
+    padding-left: var(--space-7);
+    color: var(--text-muted);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
   }
 
   .kit-menu__item--danger {

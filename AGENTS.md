@@ -10,6 +10,14 @@ condition pointing into it. Consumers type-checking with
 `svelte-check --tsgo` only transpile `.svelte` files in their own workspace,
 so without these declarations kit-ui components lose their prop types there.
 
+Keep the git-dependency install free of npm preparation. If `package.json` has
+`workspaces` or a `build`, `prepare`, `prepack`, `preinstall`, `install`, or
+`postinstall` script, npm runs `npm install --force` in a fresh clone of
+kit-ui on every consumer install. That install ignores `bun.lock` and the
+consumer's lockfile, so it fetches the whole dev toolchain at whatever versions
+the registry serves that minute. The demo build is `build:demo` for this
+reason, and `vercel.json` names it as the Vercel build command.
+
 ## Namespace runners
 
 Public Namespace runner profiles use **Restricted** access, which [disables workload access to Namespace features and APIs](https://namespace.so/docs/solutions/github-actions/runner-controls/access-levels).
@@ -20,7 +28,30 @@ Do not infer fork eligibility or network/cache isolation from this setting.
 
 Breaking API changes are 100% acceptable.
 
+## Git workflow
+
+- Finish implementation tasks by running the relevant checks, committing the
+  task's changes, and pushing the current branch before reporting completion.
+  Do not wait for a separate request to commit or push. If the user asks to
+  keep work local or uncommitted, follow that instruction. If verification,
+  committing, or pushing is blocked, report the blocker and remaining work.
+- Reviews, diagnoses, and discussions are read-only unless the user asks for
+  changes.
+- Stage only changes that belong to the task. Preserve unrelated user work.
+- Do not change branches, amend commits, or force-push unless the user
+  explicitly asks.
+- Pull requests must have a user-facing benefit or improve the developer
+  experience, and the body must say which one.
+- Write issues and pull requests in English.
+- Do not merge a pull request without explicit user authorization.
+- Do not poll or watch CI or pull request checks after pushing unless the
+  user explicitly asks. A one-time status lookup is allowed when diagnosing
+  a user-identified CI failure.
+
 ## Commands
+
+Run verification with the Bun version declared in `package.json`'s
+`packageManager` field, matching CI. The system's default Bun may differ.
 
 ```bash
 bun install
@@ -30,10 +61,10 @@ bun run generate:types     # regenerate the committed types/ declarations
 bun run check:types        # CI/hook guard: declarations present, fresh, exported
 bun run fmt      # vp fmt (oxfmt, .oxfmtrc.json) — same Vite+ setup as Forge
 bun run fmt:check && bun run lint   # CI-enforced format + lint (vite-plus)
-bun run build    # builds the demo gallery
+bun run build:demo   # builds the demo gallery
 bun test         # unit tests (checks/*.test.ts — rules, windowing, shortcuts, markdown)
 bun run test:browser       # Playwright suite against the demo gallery (docs/testing.md)
-bun run check:usage        # dogfood kit-ui-check against src/demo (must be clean)
+bun run check:usage        # dogfood kit-ui-check against src/demo, and rounded-side-stripe against src/lib (must be clean)
 bun run svelte-mcp <cmd>   # Svelte 5 docs lookup / autofixer (see skills/)
 ```
 
@@ -85,11 +116,24 @@ bun run svelte-mcp <cmd>   # Svelte 5 docs lookup / autofixer (see skills/)
 - **Checker parity**: when adding a component that replaces a common
   hand-rolled pattern, add a detection rule to `checks/rules.mjs` (+ test) so
   external projects get steered to it.
+- **Checker rules are heuristics**: rules in `checks/rules.mjs` aim to be
+  right for the common case (about 80%), not to parse Svelte, CSS, or JS
+  exactly. Do not fix, or ask the user about, review findings that are edge
+  cases of the matching itself (braces inside strings, unusual nesting,
+  markup inside script strings, rare attribute forms). Record them as not an
+  issue without asking. Do act on a rule that misfires on common, idiomatic
+  code.
 - **Exports**: every new component/type/util must be added to
   `src/lib/index.ts`, given a demo page in `src/demo/pages/` (and registered in
   `src/demo/App.svelte`), and documented in `docs/components/`. Any source
   change under `src/lib/` or `checks/rules.mjs` needs `bun run generate:types`;
   a new `package.json` export needs a `types` condition listed first.
+- **Load-time work**: `package.json`'s `sideEffects` lists the CSS, the root
+  `src/lib/index.ts`, and each module that does work when it loads (such as
+  `src/lib/utils/focus-trap.ts`, which adds document listeners). Add any new
+  such module there, or bundlers drop it from apps. When you move a listed
+  file, update its entry; `checks/package-side-effects.test.ts` fails on an
+  entry that names no file.
 
 ## Provenance
 

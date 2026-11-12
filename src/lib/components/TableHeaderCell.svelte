@@ -1,24 +1,64 @@
 <script module lang="ts">
-  export type SortDirection = "asc" | "desc";
+  export type { SortDirection } from "./table-sort.js";
 </script>
 
 <script lang="ts">
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
   import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
   import type { Snippet } from "svelte";
+  import { getContext } from "svelte";
+  import SplitResizeHandle from "./SplitResizeHandle.svelte";
+  import {
+    columnSizingContext,
+    DEFAULT_MAX_COLUMN_WIDTH,
+    DEFAULT_MIN_COLUMN_WIDTH,
+    type ColumnSizing,
+  } from "./table-columns.js";
+  import type { SortDirection, TableSortControl } from "./table-sort.js";
 
-  interface Props {
+  interface BaseProps {
     label?: string;
     children?: Snippet;
-    /** Render a sort button; `onsort` decides what sorting means. */
+    /** Render a sort button; `onsort` decides what sorting means. Prefer
+     * `sort` + `column` for client-side data. */
     sortable?: boolean;
     /** This column's current direction, or null/undefined when unsorted. */
     sortDirection?: SortDirection | null;
     onsort?: () => void;
     /** Right-align (numbers, costs, durations). */
     numeric?: boolean;
+    /** VirtualTable: the column's width in px. Unset, it is measured from
+     * rows sampled across the list. */
+    width?: number;
+    /** VirtualTable: the narrowest a resize or fit makes the column. */
+    minWidth?: number;
+    /** VirtualTable: the widest a resize or fit makes the column. */
+    maxWidth?: number;
+    /** VirtualTable: show a handle to resize the column, or double-click it
+     * to fit the column to its content. */
+    resizable?: boolean;
+    /** VirtualTable: the resize handle's accessible name. Defaults to
+     * "Resize the {label} column" in English; pass a translated string. */
+    resizeLabel?: string;
+    /** VirtualTable: the column takes the width the other columns leave in
+     * the table's box, and at least `minWidth`. It has no resize handle, and
+     * `width` and `maxWidth` do not apply to it. Without a filling column,
+     * the last column takes the spare width. */
+    fill?: boolean;
     class?: string;
   }
+
+  type Props = BaseProps &
+    (
+      | {
+          /** A TableSort (or other TableSortControl) that owns this column's
+           * sorting. Replaces `sortable`, `sortDirection`, and `onsort`. */
+          sort: TableSortControl;
+          /** This column's key in `sort`. */
+          column: string;
+        }
+      | { sort?: undefined; column?: undefined }
+    );
 
   let {
     label = undefined,
@@ -26,35 +66,103 @@
     sortable = false,
     sortDirection = null,
     onsort = undefined,
+    sort = undefined,
+    column = undefined,
     numeric = false,
+    width = undefined,
+    minWidth = DEFAULT_MIN_COLUMN_WIDTH,
+    maxWidth = DEFAULT_MAX_COLUMN_WIDTH,
+    resizable = true,
+    resizeLabel = undefined,
+    fill = false,
     class: className = "",
   }: Props = $props();
 
+  // Present inside a VirtualTable, which owns the column widths.
+  const sizing = getContext<ColumnSizing | undefined>(columnSizingContext);
+  let cell = $state<HTMLTableCellElement>();
+  const shownWidth = $derived.by(() => {
+    void sizing?.version;
+    return cell && sizing ? sizing.width(cell) : undefined;
+  });
+  const bounds = $derived.by(() => {
+    void sizing?.version;
+    return cell && sizing ? sizing.limits(cell) : { min: minWidth, max: maxWidth };
+  });
+
+  function fitOnEnter(event: KeyboardEvent): void {
+    if (event.key === "Enter" && cell && sizing) {
+      event.preventDefault();
+      sizing.fit(cell);
+    }
+  }
+
+  const isSortable = $derived(sort !== undefined || sortable);
+  const direction = $derived(
+    sort !== undefined && column !== undefined ? sort.directionOf(column) : sortDirection,
+  );
+
+  function onclick() {
+    if (sort !== undefined && column !== undefined) sort.toggle(column);
+    else onsort?.();
+  }
+
   const ariaSort = $derived(
-    !sortable || !sortDirection
+    !isSortable || !direction
       ? undefined
-      : sortDirection === "asc"
+      : direction === "asc"
         ? ("ascending" as const)
         : ("descending" as const),
   );
 </script>
 
-<th class={["kit-th", { "kit-th--numeric": numeric }, className]} scope="col" aria-sort={ariaSort}>
-  {#if sortable}
-    <button class="kit-th__sort-btn kit-control-states" type="button" onclick={() => onsort?.()}>
-      {#if label}{label}{/if}
-      {#if children}{@render children()}{/if}
-      <span class="kit-th__indicator" class:on={sortDirection}>
-        {#if sortDirection === "asc"}
+<th
+  bind:this={cell}
+  class={["kit-th", { "kit-th--numeric": numeric, "kit-th--sized": sizing }, className]}
+  scope="col"
+  aria-sort={ariaSort}
+  data-kit-column={column ?? label}
+  data-kit-width={width}
+  data-kit-min-width={minWidth}
+  data-kit-max-width={maxWidth}
+  data-kit-fill={fill ? "" : undefined}
+>
+  {#if isSortable}
+    <button class="kit-th__sort-btn kit-control-states" type="button" {onclick}>
+      <span class="kit-th__label">
+        {#if label}{label}{/if}
+        {#if children}{@render children()}{/if}
+      </span>
+      <span class="kit-th__indicator" class:on={direction}>
+        {#if direction === "asc"}
           <ArrowUpIcon size="11" strokeWidth="2.2" aria-hidden="true" />
-        {:else if sortDirection === "desc"}
+        {:else if direction === "desc"}
           <ArrowDownIcon size="11" strokeWidth="2.2" aria-hidden="true" />
         {/if}
       </span>
     </button>
   {:else}
-    {#if label}{label}{/if}
-    {#if children}{@render children()}{/if}
+    <span class="kit-th__label">
+      {#if label}{label}{/if}
+      {#if children}{@render children()}{/if}
+    </span>
+  {/if}
+  {#if sizing && resizable && !fill && shownWidth !== undefined}
+    <!-- Double-click or Enter fits the column to its content; the handle
+         itself drags and steps with the arrow keys. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span class="kit-th__resize" ondblclick={() => cell && sizing.fit(cell)} onkeydown={fitOnEnter}>
+      <SplitResizeHandle
+        variant="column"
+        ariaLabel={resizeLabel ?? `Resize the ${label ?? "column"} column`}
+        ariaValueMin={bounds.min}
+        ariaValueMax={bounds.max}
+        ariaValueNow={Math.round(shownWidth)}
+        onResizeStart={() => cell && sizing.resizeStart(cell)}
+        onResize={(event) => cell && sizing.resize(cell, event.delta)}
+        onResizeEnd={() => cell && sizing.resizeEnd(cell)}
+      />
+    </span>
   {/if}
 </th>
 
@@ -65,8 +173,12 @@
     font-weight: var(--font-weight-semibold, 600);
     color: var(--text-muted);
     text-align: left;
-    background: var(--bg-inset);
-    border-bottom: 1px solid var(--border-default);
+    background: var(--bg-table-header, var(--bg-inset));
+    /* The line under the header is an inset shadow, not a border: in a
+     * table with collapsed borders a sticky header's border stays with the
+     * table's border grid and scrolls away, leaving the stuck header without
+     * its line. */
+    box-shadow: inset 0 -1px 0 var(--border-default);
     white-space: nowrap;
     user-select: none;
   }
@@ -75,9 +187,40 @@
     text-align: right;
   }
 
+  /* A sized column can be narrower than its label: the cell clips, and the
+   * label ends with an ellipsis instead of running into the next header. */
+  .kit-th--sized {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .kit-th--sized .kit-th__sort-btn {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .kit-th--sized .kit-th__label {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* The handle sits on the cell's right edge, inside the clipped cell. */
+  .kit-th__resize {
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    display: flex;
+  }
+
+  /* Baseline alignment keeps the label on the header row's text baseline.
+   * Centered items would hand the button's baseline to its first flex item,
+   * which in a numeric (row-reverse) header is the empty arrow slot, so
+   * numeric headers sat lower than their neighbors. */
   .kit-th__sort-btn {
     display: inline-flex;
-    align-items: center;
+    align-items: baseline;
     gap: 3px;
     padding: 0;
     border: 0;
@@ -103,6 +246,7 @@
 
   .kit-th__indicator {
     display: inline-flex;
+    align-self: center;
     width: 11px;
     color: var(--accent-blue);
     opacity: 0;

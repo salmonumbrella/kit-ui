@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { renderMarkdown, type MarkdownRenderer } from "../utils/markdown.js";
+  import { applyShikiStyles, renderMarkdown, type MarkdownRenderer } from "../utils/markdown.js";
 
   interface Props {
     /** Markdown source. */
@@ -13,6 +13,12 @@
   let { source, renderer = undefined, class: className = "" }: Props = $props();
 
   let html = $state("");
+  let root = $state<HTMLDivElement>();
+
+  $effect(() => {
+    void html;
+    if (root) applyShikiStyles(root);
+  });
 
   // Async render: fences highlight once their grammar chunk loads. The
   // previous document stays visible during a re-render (no flash), and a
@@ -38,7 +44,7 @@
   });
 </script>
 
-<div class={["kit-markdown", className]}>
+<div bind:this={root} class={["kit-markdown", className]}>
   {@html html}
 </div>
 
@@ -118,6 +124,59 @@
     padding: 0 0 0 var(--space-5);
     border-left: 3px solid var(--border-default);
     color: var(--text-secondary);
+  }
+
+  /* GitHub alerts (`> [!NOTE]`), drawn like a Notice callout with the
+   * same tone accents and tint ratios. */
+  .kit-markdown :global(.kit-markdown-alert) {
+    --kit-markdown-alert-accent: var(--text-muted);
+
+    margin: 0.8em 0;
+    padding: var(--space-4) var(--space-5);
+    background: color-mix(in srgb, var(--kit-markdown-alert-accent) 8%, var(--bg-surface));
+    border: var(--border-width) solid
+      color-mix(in srgb, var(--kit-markdown-alert-accent) 32%, var(--border-default));
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+  }
+
+  .kit-markdown :global(.kit-markdown-alert--tip) {
+    --kit-markdown-alert-accent: var(--accent-teal);
+  }
+
+  .kit-markdown :global(.kit-markdown-alert--important) {
+    --kit-markdown-alert-accent: var(--accent-purple);
+  }
+
+  .kit-markdown :global(.kit-markdown-alert--warning) {
+    --kit-markdown-alert-accent: var(--accent-amber);
+  }
+
+  .kit-markdown :global(.kit-markdown-alert--caution) {
+    --kit-markdown-alert-accent: var(--accent-red);
+  }
+
+  .kit-markdown :global(.kit-markdown-alert__title) {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: 0 0 var(--space-2);
+    color: var(--text-primary);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .kit-markdown :global(.kit-markdown-alert__title::before) {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--kit-markdown-alert-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--kit-markdown-alert-accent) 16%, transparent);
+  }
+
+  .kit-markdown :global(.kit-markdown-alert > :last-child) {
+    margin-bottom: 0;
   }
 
   .kit-markdown :global(hr) {

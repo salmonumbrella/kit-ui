@@ -1,0 +1,63 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "addLabels": ["dependencies"],
+  "extends": [
+    "config:recommended",
+    "schedule:weekly",
+    "github>kenn-io/actions//renovate/release-age"
+  ],
+  "timezone": "America/New_York",
+  "osvVulnerabilityAlerts": true,
+  "prCreation": "not-pending",
+  "constraints": {
+    "ghActionsLock": "v0.3.0"
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["bun"],
+      "groupName": "JavaScript dependencies",
+      "groupSlug": "javascript-dependencies"
+    },
+    {
+      "description": [
+        "Vite+ selects these bundled versions. Update direct pins to match Vite+ toolchain upgrades, never independently."
+      ],
+      "matchManagers": ["bun"],
+      "matchPackageNames": [
+        "vite",
+        "rolldown",
+        "tsdown",
+        "vitest",
+        "@vitest/**",
+        "oxlint",
+        "oxlint-tsgolint",
+        "oxfmt"
+      ],
+      "enabled": false
+    },
+    {
+      "description": ["Update Vite+ and its Vite alias and overrides together."],
+      "matchManagers": ["bun"],
+      "matchPackageNames": ["vite-plus", "@voidzero-dev/vite-plus-core"],
+      "groupName": "Vite+ toolchain",
+      "groupSlug": "vite-plus-toolchain"
+    },
+    {
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "!/^(7\\.0\\.)/"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions"
+    },
+    {
+      "description": [
+        "Group kenn-io releases. The shared release-age preset lets them skip the wait and the weekly window."
+      ],
+      "matchPackageNames": ["kenn-io/**", "github.com/kenn-io/**", "go.kenn.io/**", "@kenn-io/**"],
+      "groupName": "kenn-io dependencies",
+      "groupSlug": "kenn-io-dependencies"
+    }
+  ]
+}

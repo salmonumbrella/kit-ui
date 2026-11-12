@@ -1,4 +1,4 @@
-type FloatingAlign = "start" | "end";
+type FloatingAlign = "start" | "center" | "end";
 type FloatingPlacement = "auto" | "below" | "above";
 
 export interface FloatingPopoverInput {
@@ -17,7 +17,16 @@ export interface FloatingPopoverInput {
   placement?: FloatingPlacement;
 }
 
-export function floatingPopoverStyle({
+export interface FloatingPopoverPosition {
+  left: number;
+  top: number;
+  /** Set only with `constrainWidth`. */
+  width: number | undefined;
+}
+
+/** Viewport coordinates for a fixed popover; `floatingPopoverStyle` formats
+ * them as inline style. */
+export function floatingPopoverPosition({
   trigger,
   viewportWidth,
   viewportHeight,
@@ -29,13 +38,13 @@ export function floatingPopoverStyle({
   maxWidth,
   constrainWidth = false,
   placement = "auto",
-}: FloatingPopoverInput): string {
+}: FloatingPopoverInput): FloatingPopoverPosition {
   const availableWidth = Math.max(0, viewportWidth - edgeGap * 2);
   const width = constrainWidth
     ? Math.min(maxWidth ?? availableWidth, availableWidth)
     : (popoverWidth ?? 0);
   const left = clamp(
-    align === "end" ? trigger.right - width : trigger.left,
+    alignedLeft(trigger, width, align),
     edgeGap,
     Math.max(edgeGap, viewportWidth - width - edgeGap),
   );
@@ -47,12 +56,69 @@ export function floatingPopoverStyle({
     triggerGap,
     placement,
   });
+  return { left, top: Math.round(top), width: constrainWidth ? Math.round(width) : undefined };
+}
 
-  const style = [`left: ${formatPx(left)}px`, `top: ${Math.round(top)}px`];
-  if (constrainWidth) {
-    style.push(`width: ${Math.round(width)}px`);
+export function floatingPopoverStyle(input: FloatingPopoverInput): string {
+  const { left, top, width } = floatingPopoverPosition(input);
+  const style = [`left: ${formatPx(left)}px`, `top: ${top}px`];
+  if (width !== undefined) {
+    style.push(`width: ${width}px`);
   }
   return style.join("; ");
+}
+
+export interface FloatingFlyoutInput {
+  /** The row the flyout belongs to; the flyout's top lines up with it. */
+  anchor: Pick<DOMRect, "top">;
+  /** The parent panel; the flyout opens beside it, right side first. */
+  panel: Pick<DOMRect, "left" | "right">;
+  viewportWidth: number;
+  viewportHeight: number;
+  flyoutWidth: number;
+  flyoutHeight: number;
+  edgeGap?: number;
+  /** Space between panel and flyout. The default -1 overlaps the two
+   * borders, so the flyout reads as attached to the panel. */
+  panelGap?: number;
+}
+
+/** Inline style for a fixed submenu flyout beside its parent panel. It opens
+ * to the right, flips to the left when the right side is too narrow, and
+ * overlaps the panel only when neither side fits. */
+export function floatingFlyoutStyle({
+  anchor,
+  panel,
+  viewportWidth,
+  viewportHeight,
+  flyoutWidth,
+  flyoutHeight,
+  edgeGap = 8,
+  panelGap = -1,
+}: FloatingFlyoutInput): string {
+  const right = panel.right + panelGap;
+  const left = panel.left - panelGap - flyoutWidth;
+  const maxLeft = Math.max(edgeGap, viewportWidth - flyoutWidth - edgeGap);
+  let x: number;
+  if (right <= maxLeft) x = right;
+  else if (left >= edgeGap) x = left;
+  else x = clamp(right, edgeGap, maxLeft);
+  const y = clamp(
+    anchor.top - 4,
+    edgeGap,
+    Math.max(edgeGap, viewportHeight - flyoutHeight - edgeGap),
+  );
+  return `left: ${formatPx(x)}px; top: ${Math.round(y)}px`;
+}
+
+function alignedLeft(
+  trigger: Pick<DOMRect, "left" | "right">,
+  width: number,
+  align: FloatingAlign,
+): number {
+  if (align === "end") return trigger.right - width;
+  if (align === "center") return (trigger.left + trigger.right - width) / 2;
+  return trigger.left;
 }
 
 interface FloatingTopInput {

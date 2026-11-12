@@ -443,6 +443,39 @@ export function checkHandRolledTooltip(source) {
   return findings;
 }
 
+/** Hand-rolled `<details>` disclosures duplicate Disclosure, which adds
+ * the chevron, focus ring, deep-link anchors, and Accordion grouping on
+ * the same native element. Matches the opening tag only. */
+export function checkHandRolledDisclosure(source) {
+  const findings = [];
+  const re = /<details[\s>]/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    findings.push({
+      rule: "hand-rolled-disclosure",
+      line: lineOfIndex(source, match.index),
+      message: "<details> markup — use Disclosure (or Accordion for a group) from @kenn-io/kit-ui",
+    });
+  }
+  return findings;
+}
+
+/** Hand-rolled tab strips duplicate Tabs. role="tablist" is the reliable
+ * marker: a conformant custom tab strip must carry it. */
+export function checkHandRolledTabs(source) {
+  const findings = [];
+  const re = /role="tablist"/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    findings.push({
+      rule: "hand-rolled-tabs",
+      line: lineOfIndex(source, match.index),
+      message: 'role="tablist" markup — use Tabs from @kenn-io/kit-ui',
+    });
+  }
+  return findings;
+}
+
 /** Hand-rolled bottom status bars duplicate StatusBar. Matches the class
  * name both apps converged on; kit-status-bar (the library's own class,
  * e.g. in retheming CSS) is exempt. */
@@ -473,6 +506,23 @@ export function checkHandRolledTopBar(source) {
       rule: "hand-rolled-top-bar",
       line: lineOfIndex(source, match.index),
       message: "app-header markup — use TopBar from @kenn-io/kit-ui",
+    });
+  }
+  return findings;
+}
+
+/** Hand-rolled page headers duplicate PageHeader, and the copies tend to draw
+ * a rule under the title that doubles with the first bordered block below.
+ * Matches page-header / page-heading class names; kit-page-header is exempt. */
+export function checkHandRolledPageHeader(source) {
+  const findings = [];
+  const re = /class="[^"]*(?<!kit-)\bpage-head(?:er|ing)\b|\.(?<!kit-)page-head(?:er|ing)\b/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    findings.push({
+      rule: "hand-rolled-page-header",
+      line: lineOfIndex(source, match.index),
+      message: "page-header markup — use PageHeader from @kenn-io/kit-ui",
     });
   }
   return findings;
@@ -515,16 +565,19 @@ export function checkHandRolledCodeBlock(source) {
   return findings;
 }
 
-/** Hand-rolled empty/placeholder states duplicate EmptyState. */
+/** Hand-rolled empty/placeholder states duplicate EmptyState. `missing-data`
+ * is the name such a block often has for a whole page. */
 export function checkHandRolledEmptyState(source) {
   const findings = [];
-  const re = /class="[^"]*(?<!kit-)\bempty-state\b|\.(?<!kit-)empty-state\b/g;
+  const re =
+    /class="[^"]*(?<!kit-)\b(empty-state|missing-data)\b|\.(?<!kit-)(empty-state|missing-data)\b/g;
   let match;
   while ((match = re.exec(source)) !== null) {
     findings.push({
       rule: "hand-rolled-empty-state",
       line: lineOfIndex(source, match.index),
-      message: "empty-state markup — use EmptyState from @kenn-io/kit-ui",
+      message:
+        'empty-state markup — use EmptyState from @kenn-io/kit-ui (align="top" for a whole page or panel under its header)',
     });
   }
   return findings;
@@ -543,6 +596,24 @@ export function checkHandRolledImagePreview(source) {
       rule: "hand-rolled-image-preview",
       line: lineOfIndex(source, match.index),
       message: "image preview markup — use ImagePreview from @kenn-io/kit-ui",
+    });
+  }
+  return findings;
+}
+
+/** Native `<video controls>` players duplicate VideoPlayer, whose control
+ * bar adds expanding into MediaViewer; the browser's controls can't take
+ * that button. Matches a `<video>` tag with a `controls` attribute, unless
+ * it is `controls={false}`. */
+const NATIVE_VIDEO_CONTROLS = /<video\b[^>]*\scontrols(?!\s*=\s*\{\s*false\s*\})\b/gi;
+
+export function checkHandRolledVideoPlayer(source) {
+  const findings = [];
+  for (const match of source.matchAll(NATIVE_VIDEO_CONTROLS)) {
+    findings.push({
+      rule: "hand-rolled-video-player",
+      line: lineOfIndex(source, match.index),
+      message: "native video controls — use VideoPlayer from @kenn-io/kit-ui",
     });
   }
   return findings;
@@ -618,6 +689,164 @@ export function checkHandRolledTableSort(source) {
   return findings;
 }
 
+/** End of the tag that opens at `start` (index just past its `>`), skipping
+ * `>` inside quoted attribute values and `{…}` expressions. */
+function tagEnd(source, start) {
+  let depth = 0;
+  let quote = null;
+  for (let i = start; i < source.length; i += 1) {
+    const char = source[i];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === "{") depth += 1;
+    else if (char === "}") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && (char === '"' || char === "'")) quote = char;
+    else if (depth === 0 && char === ">") return i + 1;
+  }
+  return source.length;
+}
+
+/** A tag's attributes by name, read from the text between its name and its
+ * `>`: true for a bare `name` or a `{name}` shorthand, otherwise the raw
+ * value with its quotes or braces. Spreads are skipped. */
+function parseAttrs(attrs) {
+  const found = new Map();
+  let i = 0;
+  const skipSpace = () => {
+    while (i < attrs.length && /\s/.test(attrs[i])) i += 1;
+  };
+  const skipBraces = () => {
+    let depth = 0;
+    for (; i < attrs.length; i += 1) {
+      if (attrs[i] === "{") depth += 1;
+      else if (attrs[i] === "}" && --depth === 0) {
+        i += 1;
+        return;
+      }
+    }
+  };
+  for (skipSpace(); i < attrs.length; skipSpace()) {
+    const start = i;
+    if (attrs[i] === "{") {
+      skipBraces();
+      const shorthand = /^\{\s*([\w$]+)\s*\}$/.exec(attrs.slice(start, i));
+      if (shorthand) found.set(shorthand[1], true);
+      continue;
+    }
+    const name = /^[^\s=/>{"']+/.exec(attrs.slice(i))?.[0];
+    if (!name) {
+      i += 1;
+      continue;
+    }
+    i += name.length;
+    skipSpace();
+    if (attrs[i] !== "=") {
+      found.set(name, true);
+      continue;
+    }
+    i += 1;
+    skipSpace();
+    const valueStart = i;
+    if (attrs[i] === "{") skipBraces();
+    else if (attrs[i] === '"' || attrs[i] === "'") {
+      const close = attrs.indexOf(attrs[i], i + 1);
+      i = close < 0 ? attrs.length : close + 1;
+    } else while (i < attrs.length && !/[\s/>]/.test(attrs[i])) i += 1;
+    found.set(name, attrs.slice(valueStart, i));
+  }
+  return found;
+}
+
+/** The text of a static attribute value (`"x"`, `'x'`, `{"x"}`, or bare
+ * `x`), or null for an expression, a bare attribute, or no attribute. */
+function literal(value) {
+  if (typeof value !== "string") return null;
+  const quoted = /^(["'])([^]*)\1$/.exec(value) ?? /^\{\s*(["'`])([^"'`\\$]*)\1\s*\}$/.exec(value);
+  if (quoted) return quoted[2];
+  return /^[^"'{]/.test(value) ? value : null;
+}
+
+/** The text a header's children show: markup tags, Svelte block tags
+ * (`{#if}`, `{:else}`, `{/if}`), `{@const}` declarations, and `kit-sr-only`
+ * elements removed. Tags end with tagEnd, so a `>` inside an attribute
+ * expression stays inside its tag. */
+function visibleText(content) {
+  let text = "";
+  for (let i = 0; i < content.length;) {
+    if (content[i] === "<" && /[A-Za-z/!]/.test(content[i + 1] ?? "")) {
+      const end = tagEnd(content, i + 1);
+      const tag = content.slice(i, end);
+      const name = /^<([A-Za-z][\w.-]*)/.exec(tag)?.[1];
+      i = end;
+      const classes = name && literal(parseAttrs(tag.slice(name.length + 1, -1)).get("class"));
+      if (name && !tag.endsWith("/>") && classes?.split(/\s+/).includes("kit-sr-only")) {
+        const close = content.indexOf(`</${name}>`, i);
+        i = close < 0 ? content.length : close + name.length + 3;
+      }
+    } else {
+      text += content[i];
+      i += 1;
+    }
+  }
+  return text.replace(/\{(?:[#:/]|@const\s)[^}]*\}/g, "").trim();
+}
+
+/** Every table with a header must sort. A labeled TableHeaderCell needs
+ * `sort={…} column="…"` (TableSort) or `sortable`; a raw `<th>` with visible
+ * text cannot sort at all. The one exception is a `<Table unsorted>` (or
+ * `<VirtualTable unsorted>`), which opts out explicitly. Headers with no
+ * visible text (a checkbox or actions column) and row headers
+ * (`scope="row"`) are exempt. */
+export function checkUnsortedTableHeader(source, filename) {
+  if (!filename.endsWith(".svelte")) return [];
+  // Blank out comments so commented-out markup is not checked.
+  const code = source.replace(/<!--[\s\S]*?-->/g, (comment) => comment.replace(/[^\n]/g, " "));
+  const findings = [];
+  const re = /<(TableHeaderCell|th)(?=[\s/>])/g;
+  let match;
+  while ((match = re.exec(code)) !== null) {
+    const name = match[1];
+    const end = tagEnd(code, match.index + match[0].length);
+    const attrs = code.slice(match.index + match[0].length, end - 1);
+    let content = "";
+    if (!attrs.trimEnd().endsWith("/")) {
+      const close = code.indexOf(`</${name}>`, end);
+      content = code.slice(end, close < 0 ? end : close);
+    }
+    const attributes = parseAttrs(attrs);
+    const sortable =
+      name === "TableHeaderCell" &&
+      (attributes.has("sort") ||
+        (attributes.has("sortable") &&
+          !/^\{\s*false\s*\}$/.test(String(attributes.get("sortable")))));
+    if (sortable) continue;
+    const scope = literal(attributes.get("scope"));
+    if (scope === "row" || scope === "rowgroup") continue;
+    const visible =
+      (attributes.has("label") && literal(attributes.get("label")) !== "") ||
+      visibleText(content) !== "";
+    if (!visible) continue;
+    const before = code.slice(0, match.index);
+    const opening = [...before.matchAll(/<(?:Virtual)?Table(?=[\s>])/g)].at(-1);
+    const tableAt = opening?.index ?? -1;
+    if (opening && !/<\/(?:Virtual)?Table>/.test(before.slice(tableAt))) {
+      const tableStart = tableAt + opening[0].length;
+      const tableAttrs = code.slice(tableStart, tagEnd(code, tableStart) - 1);
+      const unsorted = parseAttrs(tableAttrs).get("unsorted");
+      if (unsorted !== undefined && !/^\{\s*false\s*\}$/.test(String(unsorted))) continue;
+    }
+    findings.push({
+      rule: "unsorted-table-header",
+      line: lineOfIndex(source, match.index),
+      message:
+        name === "th"
+          ? "table header that cannot sort — use Table + TableHeaderCell with TableSort from @kenn-io/kit-ui"
+          : 'table header without sorting — pass sort={tableSort} column="…" (TableSort) or sortable; or opt the table out with <Table unsorted>',
+    });
+  }
+  return findings;
+}
+
 /** Hand-rolled search inputs duplicate SearchInput. type="search" is the
  * reliable marker; the class names are established consumer patterns.
  * kit-search-input (the library's own class) is exempt. */
@@ -646,7 +875,39 @@ export function checkHandRolledDateInput(source) {
     findings.push({
       rule: "hand-rolled-date-input",
       line: lineOfIndex(source, match.index),
-      message: `type="${match[1]}" input — use DateRangePicker or Calendar from @kenn-io/kit-ui`,
+      message: `type="${match[1]}" input — use DatePicker (one date), DateRangePicker, or Calendar from @kenn-io/kit-ui`,
+    });
+  }
+  return findings;
+}
+
+/** Native number inputs duplicate NumberInput: they render platform
+ * spinner buttons and size themselves apart from the other fields. */
+export function checkHandRolledNumberInput(source) {
+  const findings = [];
+  const re = /type=(["'])number\1/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    findings.push({
+      rule: "hand-rolled-number-input",
+      line: lineOfIndex(source, match.index),
+      message: 'type="number" input — use NumberInput from @kenn-io/kit-ui',
+    });
+  }
+  return findings;
+}
+
+/** Native color inputs render unthemed platform chrome and offer no hex
+ * entry or quick picks. */
+export function checkHandRolledColorInput(source) {
+  const findings = [];
+  const re = /type="color"/g;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    findings.push({
+      rule: "hand-rolled-color-input",
+      line: lineOfIndex(source, match.index),
+      message: 'type="color" input — use ColorInput from @kenn-io/kit-ui',
     });
   }
   return findings;
@@ -669,8 +930,9 @@ export function checkHandRolledToast(source) {
 }
 
 /** Hand-rolled slide-in drawers and explicit inline bottom-panel patterns
- * duplicate DetailDrawer or BottomDock. Other drawer-* and generic dock names
- * are left alone; kit component classes are exempt. */
+ * duplicate DetailDrawer, BottomDock or, for app navigation, AppSidebar. Other
+ * drawer-* and generic dock names are left alone; kit component classes are
+ * exempt. */
 export function checkHandRolledDrawer(source) {
   const findings = [];
   const drawerPart =
@@ -685,7 +947,7 @@ export function checkHandRolledDrawer(source) {
       rule: "hand-rolled-drawer",
       line: lineOfIndex(source, match.index),
       message:
-        "drawer/bottom-panel markup — use DetailDrawer for overlay side sheets or BottomDock for inline bottom panels from @kenn-io/kit-ui",
+        "drawer/bottom-panel markup — use DetailDrawer for overlay side sheets, BottomDock for inline bottom panels or AppSidebar for app navigation from @kenn-io/kit-ui",
     });
   }
 
@@ -697,7 +959,7 @@ export function checkHandRolledDrawer(source) {
       rule: "hand-rolled-drawer",
       line: lineOfIndex(source, match.index),
       message:
-        "drawer/bottom-panel markup — use DetailDrawer for overlay side sheets or BottomDock for inline bottom panels from @kenn-io/kit-ui",
+        "drawer/bottom-panel markup — use DetailDrawer for overlay side sheets, BottomDock for inline bottom panels or AppSidebar for app navigation from @kenn-io/kit-ui",
     });
   }
 
@@ -707,7 +969,7 @@ export function checkHandRolledDrawer(source) {
       rule: "hand-rolled-drawer",
       line: lineOfIndex(source, match.index),
       message:
-        "drawer/bottom-panel markup — use DetailDrawer for overlay side sheets or BottomDock for inline bottom panels from @kenn-io/kit-ui",
+        "drawer/bottom-panel markup — use DetailDrawer for overlay side sheets, BottomDock for inline bottom panels or AppSidebar for app navigation from @kenn-io/kit-ui",
     });
   }
   return findings;
@@ -759,25 +1021,28 @@ export function checkHandRolledSidebarToggle(source) {
   return findings;
 }
 
-/** Raw native checkboxes (bare markup, input[type=checkbox] selectors, or
- * checkbox-scoped accent-color styling) duplicate Checkbox/Toggle.
+/** Raw native inputs of one type (bare markup, input[type=…] selectors, or
+ * type-scoped accent-color styling) that duplicate a drawn kit-ui control.
  * accent-color on OTHER controls (range sliders, progress) is legitimate —
  * theme.css sets it globally — so the CSS signal requires a selector that
- * names checkboxes. kit-ui's own Markdown component already styles
- * rendered task-list checkboxes. */
-export function checkHandRolledCheckbox(source, filename) {
+ * names the input type.
+ * @param {string} source
+ * @param {string} filename
+ * @param {{ type: string, rule: string, replacement: string }} options */
+function handRolledNativeInput(source, filename, { type, rule, replacement }) {
   const findings = [];
   // [^<>] (not [^>]) so a failed attempt can't rescan past the next tag —
   // the checker runs over arbitrary project files, so its regexes must
   // stay linear on pathological inputs (CodeQL js/polynomial-redos).
-  const markupRe = /<input\b[^<>]*type=["']checkbox["']/g;
+  const markupRe = new RegExp(`<input\\b[^<>]*type=["']${type}["']`, "g");
+  const selectorRe = new RegExp(`input\\[type=["']?${type}["']?\\]`);
+  const namedRe = new RegExp(type, "i");
   let match;
   while ((match = markupRe.exec(source)) !== null) {
     findings.push({
-      rule: "hand-rolled-checkbox",
+      rule,
       line: lineOfIndex(source, match.index),
-      message:
-        "native checkbox markup — use Checkbox (or Toggle for on/off settings) from @kenn-io/kit-ui",
+      message: `native ${type} markup — use ${replacement} from @kenn-io/kit-ui`,
     });
   }
   for (const { css, offset } of styleBlocks(source, filename)) {
@@ -856,15 +1121,13 @@ export function checkHandRolledCheckbox(source, filename) {
         const frame = stack.pop();
         if (frame) {
           frame.direct += pending;
-          const selectsCheckbox = /input\[type=["']?checkbox["']?\]/.test(frame.selector);
-          const checkboxAccent =
-            /checkbox/i.test(frame.selector) && frame.direct.includes("accent-color:");
-          if (selectsCheckbox || checkboxAccent) {
+          const selectsType = selectorRe.test(frame.selector);
+          const typeAccent = namedRe.test(frame.selector) && frame.direct.includes("accent-color:");
+          if (selectsType || typeAccent) {
             findings.push({
-              rule: "hand-rolled-checkbox",
+              rule,
               line: baseLine + frame.line,
-              message:
-                "styled native checkbox — use Checkbox (or Toggle for on/off settings) from @kenn-io/kit-ui",
+              message: `styled native ${type} — use ${replacement} from @kenn-io/kit-ui`,
             });
           }
         }
@@ -876,6 +1139,25 @@ export function checkHandRolledCheckbox(source, filename) {
     }
   }
   return findings;
+}
+
+/** Raw native checkboxes duplicate Checkbox/Toggle. kit-ui's own Markdown
+ * component already styles rendered task-list checkboxes. */
+export function checkHandRolledCheckbox(source, filename) {
+  return handRolledNativeInput(source, filename, {
+    type: "checkbox",
+    rule: "hand-rolled-checkbox",
+    replacement: "Checkbox (or Toggle for on/off settings)",
+  });
+}
+
+/** Raw native radios duplicate RadioGroup. */
+export function checkHandRolledRadio(source, filename) {
+  return handRolledNativeInput(source, filename, {
+    type: "radio",
+    rule: "hand-rolled-radio",
+    replacement: "RadioGroup (or SegmentedControl for inline view switches)",
+  });
 }
 
 /** Hand-built switches (role="switch" plus a track/knob) duplicate Toggle. */
@@ -959,7 +1241,7 @@ export function checkHandRolledVirtualization(source) {
     findings.push({
       rule: "hand-rolled-virtualization",
       line: lineOfIndex(source, match.index),
-      message: `${match[1]} import — use VirtualList from @kenn-io/kit-ui`,
+      message: `${match[1]} import — use VirtualList or VirtualTable from @kenn-io/kit-ui`,
     });
   }
   return findings;
@@ -1061,7 +1343,11 @@ export function checkLocalDebounce(source) {
 export function checkPinnedRootFontSize(source, filename) {
   const findings = [];
   for (const { css, offset } of styleBlocks(source, filename)) {
-    const re = /(?:^|[\s,}])(?:html|:root)\b[^{}]*\{[^}]*?font-size:\s*([^;}]+)/gm;
+    // html or :root itself, optionally qualified (:root.dark, html[lang]),
+    // anywhere in a selector list. `:root .kit-tab` styles a descendant,
+    // not the root, so a combinator after it does not count.
+    const re =
+      /(?:^|[\s,}])(?:html|:root)\b[^\s{},>+~]*\s*(?:,[^{}]*)?\{[^}]*?font-size:\s*([^;}]+)/gm;
     let match;
     while ((match = re.exec(css)) !== null) {
       const value = match[1].trim();
@@ -1457,8 +1743,144 @@ export function checkSplitHandleOverride(source, filename) {
   return findings;
 }
 
+// Corner indexes in border-radius order: top-left, top-right, bottom-right, bottom-left.
+const STRIPE_CORNERS = { left: [0, 3], right: [1, 2] };
+const RADIUS_LONGHANDS = {
+  "border-top-left-radius": 0,
+  "border-start-start-radius": 0,
+  "border-top-right-radius": 1,
+  "border-start-end-radius": 1,
+  "border-bottom-right-radius": 2,
+  "border-end-end-radius": 2,
+  "border-bottom-left-radius": 3,
+  "border-end-start-radius": 3,
+};
+
+/** Which corners one rule leaves squared, after its declarations in order. */
+function squaredCorners(body) {
+  const square = [false, false, false, false];
+  const isZero = (value) => /^0(?:px|rem|em|%)?$/.test(value);
+  // Split on spaces outside var() and calc(), after dropping !important.
+  const radii = (value) =>
+    value.replace(/\s*!\s*important\s*$/i, "").match(/(?:[^\s(]+|\([^)]*\))+/g) ?? [];
+  const declarationRe = /(?:^|;)\s*(border(?:-[a-z]+)*-radius)\s*:\s*([^;]*)/g;
+  let declaration;
+  while ((declaration = declarationRe.exec(body)) !== null) {
+    const property = declaration[1].toLowerCase();
+    const value = declaration[2].trim();
+    if (property in RADIUS_LONGHANDS) {
+      square[RADIUS_LONGHANDS[property]] = isZero(radii(value)[0] ?? "");
+    } else if (property === "border-radius") {
+      const [a, b = a, c = a, d = b] = radii(value.split("/")[0]);
+      [a, b, c, d].forEach((radius, corner) => (square[corner] = isZero(radius)));
+    }
+  }
+  return square;
+}
+
+/** Whether a border width draws a stripe: 2px or more, or medium or thick. */
+function isStripeWidth(value) {
+  return (
+    /\b(?:medium|thick)\b/.test(value) ||
+    [...value.matchAll(/(?<![\w-])([\d.]+)(px|rem|em)\b/g)].some(
+      ([, size, unit]) => Number(size) * (unit === "px" ? 1 : 16) >= 2,
+    )
+  );
+}
+
+/**
+ * The sides one declaration draws a stripe on. A uniform border is a frame,
+ * not a stripe. A transparent stripe counts: a state rule elsewhere usually
+ * colors it.
+ */
+function stripeSides(property, side, value) {
+  if (property === "box-shadow") {
+    return [...value.matchAll(/\binset\s+(-?[\d.]+)px\s+0(?:px)?\s+0(?:px)?\b/g)]
+      .filter(([, x]) => Math.abs(Number(x)) >= 2)
+      .map(([, x]) => (Number(x) > 0 ? "left" : "right"));
+  }
+  if (side) {
+    const drawn = isStripeWidth(value) && !/\b(?:none|hidden)\b/.test(value);
+    return drawn ? [/^(?:left|inline-start)$/i.test(side) ? "left" : "right"] : [];
+  }
+  // border-width: top right bottom left; a side wider than the top.
+  const [top = "", right = top, , left = right] = value.trim().split(/\s+/);
+  return [
+    ...(left !== top && isStripeWidth(left) ? ["left"] : []),
+    ...(right !== top && isStripeWidth(right) ? ["right"] : []),
+  ];
+}
+
+/**
+ * A side stripe is a colored bar on one edge of a box: a side border of 2px
+ * or more, or an inset box-shadow offset only sideways by 2px or more. On a
+ * square edge it is fine. On a rounded edge it bends around the corners.
+ *
+ * A stripe passes when, for each selector in its rule's selector list, rules
+ * in this file for that selector square both corners on the stripe's side.
+ * Media queries and other conditions are not modeled: a square corner in any
+ * of them counts. A radius set elsewhere, by another selector or a component,
+ * cannot be seen here, so it counts as rounded. Quotations keep their side
+ * border.
+ */
+export function checkRoundedSideStripe(source, filename) {
+  const findings = [];
+  const blocks = styleBlocks(source, filename).map(({ css, offset }) => ({
+    offset,
+    rules: cssRulesWithNesting(blankComments(css)),
+  }));
+  const selectors = (rule) =>
+    topLevelParts(rule.selector ?? "", /,/).map((part) => part.replace(/\s+/g, " ").trim());
+  const squared = new Map();
+  for (const rule of blocks.flatMap((block) => block.rules)) {
+    const square = squaredCorners(rule.body);
+    for (const selector of selectors(rule)) {
+      const corners = squared.get(selector) ?? [false, false, false, false];
+      squared.set(
+        selector,
+        corners.map((corner, index) => corner || square[index]),
+      );
+    }
+  }
+  for (const { rules, offset } of blocks) {
+    for (const rule of rules) {
+      if (/\bblockquote\b/.test(rule.selector ?? "")) continue;
+      const declarationRe =
+        /(?:^|;)\s*(border-(left|right|inline-start|inline-end)(?:-width)?|border-width|box-shadow)\s*:\s*([^;]*)/g;
+      let declaration;
+      while ((declaration = declarationRe.exec(rule.body)) !== null) {
+        const property = declaration[1].toLowerCase();
+        const value = declaration[3];
+        const side = stripeSides(property, declaration[2], value).find((stripe) =>
+          selectors(rule).some(
+            (selector) =>
+              !STRIPE_CORNERS[stripe].every((corner) => squared.get(selector)?.[corner]),
+          ),
+        );
+        if (!side) continue;
+        const [first, second] =
+          side === "left" ? ["start-start", "end-start"] : ["start-end", "end-end"];
+        findings.push({
+          rule: "rounded-side-stripe",
+          line: lineOfIndex(
+            source,
+            offset + rule.bodyStart + declaration.index + declaration[0].indexOf(declaration[1]),
+          ),
+          message: `\`${property}: ${value.trim()}\` draws a side stripe whose corners may be rounded, so it bends around them — square that edge for this selector (\`border-${first}-radius: 0; border-${second}-radius: 0\`) or drop the stripe`,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 /** Rules a kit-ui-check-ignore marker or --disable cannot turn off. */
-export const UNSUPPRESSIBLE_RULES = new Set(["split-handle-override"]);
+// unsorted-table-header has its own, explicit exception: <Table unsorted>.
+export const UNSUPPRESSIBLE_RULES = new Set([
+  "rounded-side-stripe",
+  "split-handle-override",
+  "unsorted-table-header",
+]);
 
 export const ALL_RULES = {
   "nonstandard-breakpoint": checkBreakpoints,
@@ -1473,7 +1895,10 @@ export const ALL_RULES = {
   "hand-rolled-splitter": checkHandRolledSplitter,
   "hand-rolled-segmented": checkHandRolledSegmented,
   "hand-rolled-table-sort": checkHandRolledTableSort,
+  "unsorted-table-header": checkUnsortedTableHeader,
   "hand-rolled-tooltip": checkHandRolledTooltip,
+  "hand-rolled-disclosure": checkHandRolledDisclosure,
+  "hand-rolled-tabs": checkHandRolledTabs,
   "hand-rolled-popover-card": checkHandRolledPopoverCard,
   "hand-rolled-card": checkHandRolledCard,
   "hand-rolled-status-bar": checkHandRolledStatusBar,
@@ -1482,14 +1907,19 @@ export const ALL_RULES = {
   "hand-rolled-icon-button": checkHandRolledIconButton,
   "hand-rolled-image-preview": checkHandRolledImagePreview,
   "hand-rolled-lightbox": checkHandRolledLightbox,
+  "hand-rolled-video-player": checkHandRolledVideoPlayer,
   "hand-rolled-top-bar": checkHandRolledTopBar,
+  "hand-rolled-page-header": checkHandRolledPageHeader,
   "hand-rolled-search-input": checkHandRolledSearchInput,
   "hand-rolled-date-input": checkHandRolledDateInput,
+  "hand-rolled-number-input": checkHandRolledNumberInput,
+  "hand-rolled-color-input": checkHandRolledColorInput,
   "hand-rolled-toast": checkHandRolledToast,
   "hand-rolled-drawer": checkHandRolledDrawer,
   "hand-rolled-find-bar": checkHandRolledFindBar,
   "hand-rolled-status-dot": checkHandRolledStatusDot,
   "hand-rolled-checkbox": checkHandRolledCheckbox,
+  "hand-rolled-radio": checkHandRolledRadio,
   "hand-rolled-toggle": checkHandRolledToggle,
   "hand-rolled-sidebar-toggle": checkHandRolledSidebarToggle,
   "hand-rolled-sr-only": checkHandRolledSrOnly,
@@ -1507,6 +1937,7 @@ export const ALL_RULES = {
   "legacy-svelte": checkLegacySvelte,
   "chip-label-override": checkChipLabelOverride,
   "split-handle-override": checkSplitHandleOverride,
+  "rounded-side-stripe": checkRoundedSideStripe,
 };
 
 /** Run all (or the selected) rules on one file's source. */

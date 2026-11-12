@@ -24,18 +24,18 @@ the client. The pure planner/validator exports are environment-agnostic.
 <CodeBlock code={source} language="ts" title="session.ts" lineNumbers />
 ```
 
-| Prop                      | Type                 | Default          | Notes                                                      |
-| ------------------------- | -------------------- | ---------------- | ---------------------------------------------------------- |
-| `code`                    | `string`             | required         |                                                            |
-| `language`                | `string`             | —                | Fence language; omitted/unknown renders escaped plain text |
-| `title`                   | `string`             | —                | Header label (filename); defaults to the language          |
-| `lineNumbers`             | `boolean`            | `false`          | CSS-counter gutter (plain and highlighted output)          |
-| `wrap`                    | `boolean` (bindable) | `false`          | Soft-wrap long lines                                       |
-| `wrapToggle`              | `boolean`            | `true`           | Show the header wrap button                                |
-| `copyable`                | `boolean`            | `true`           | Show the CopyButton                                        |
-| `maxHeight`               | `string`             | —                | Cap the body height (scrolls beyond)                       |
-| `copyLabel` / `wrapLabel` | `string`             | English defaults | i18n                                                       |
-| `class`                   | `string`             | `""`             |                                                            |
+| Prop                                      | Type                 | Default          | Notes                                                                    |
+| ----------------------------------------- | -------------------- | ---------------- | ------------------------------------------------------------------------ |
+| `code`                                    | `string`             | required         |                                                                          |
+| `language`                                | `string`             | —                | Fence language; omitted/unknown renders escaped plain text               |
+| `title`                                   | `string`             | —                | Header label (filename); defaults to the language                        |
+| `lineNumbers`                             | `boolean`            | `false`          | CSS-counter gutter (plain and highlighted output)                        |
+| `wrap`                                    | `boolean` (bindable) | `false`          | Soft-wrap long lines                                                     |
+| `wrapToggle`                              | `boolean`            | `true`           | Show the header wrap button                                              |
+| `copyable`                                | `boolean`            | `true`           | Show the CopyButton                                                      |
+| `maxHeight`                               | `string`             | —                | Cap the body height (scrolls beyond)                                     |
+| `copyLabel` / `copiedLabel` / `wrapLabel` | `string`             | English defaults | i18n; `copiedLabel` is the copy button's label and tooltip after copying |
+| `class`                                   | `string`             | `""`             |                                                                          |
 
 Highlighting is async — grammar chunks load on demand and the escaped
 plain rendering shows until then (and stays for unknown languages or
@@ -66,6 +66,32 @@ stays visible during a re-render, and a stale async render never
 overwrites a newer one. Pass `renderer` (below) for app syntax. Prose
 styles are namespaced under `.kit-markdown` and use theme tokens.
 
+## Alerts
+
+GitHub alert blockquotes render as toned callouts that match
+[Notice](auth-surfaces.md#notice):
+
+```markdown
+> [!TIP]
+> Run `bun run check` before pushing.
+```
+
+The kinds are `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, and `CAUTION`, in any
+case. As on GitHub, the marker must be alone on the quote's first line,
+and only top-level quotes become alerts. A quote inside a list stays a
+quote. The output is a `div.kit-markdown-alert.kit-markdown-alert--<kind>`
+with `role="note"` and a visible title.
+
+`createMarkdownRenderer({ alerts: false })` keeps alerts as plain quotes.
+`alertLabels` localizes the titles; missing kinds keep the English
+defaults from `DEFAULT_MARKDOWN_ALERT_LABELS`:
+
+```ts
+createMarkdownRenderer({ alertLabels: { tip: "Astuce", warning: "Attention" } });
+```
+
+A missing, undefined, or blank title falls back to the default.
+
 ## Pipeline (`utils/markdown`)
 
 ```ts
@@ -74,17 +100,31 @@ import {
   renderMarkdownSync, // sync: highlights only already-loaded grammars
   createMarkdownRenderer,
   highlightCode, // one block → shiki HTML | null (CodeBlock uses this)
+  applyShikiStyles, // after inserting highlighted HTML yourself (see below)
 } from "@kenn-io/kit-ui"; // or "@kenn-io/kit-ui/utils/markdown"
 ```
 
 `createMarkdownRenderer(options)` is the app extension point — create one
 per app and reuse it (each instance owns a Marked instance and a render
-cache, cleared past 500 entries):
+cache capped at 8,388,608 source characters):
 
 ```ts
 const renderer = createMarkdownRenderer({
   // marked tokenizer/renderer extensions (issue refs, wrapper tags)
   extensions: [myItemRefExtension],
+  // override a built-in tokenizer, with Marked's native `this` context
+  tokenizer: {
+    paragraph(src) {
+      const match = /^(Note: [^\n]+)(?:\n|$)/.exec(src);
+      if (!match) return false;
+      return {
+        type: "paragraph",
+        raw: match[0],
+        text: match[1],
+        tokens: this.lexer.inline(match[1]),
+      };
+    },
+  },
   // intercept fences (custom viewers); undefined falls through. For
   // mermaid, pass the ready-made `mermaidCodeFence` (see mermaid.md)
   codeFence: (code, lang) =>
@@ -93,6 +133,17 @@ const renderer = createMarkdownRenderer({
   allowedAttributes: ["data-item-ref"],
 });
 ```
+
+Use `tokenizer` when custom syntax needs to change how a built-in rule
+such as `paragraph` or `html` consumes input. Block `extensions` add
+rules; built-in overrides let an app coordinate paragraph and HTML
+parsing, for example, around a wrapped diff. The option uses Marked's
+`TokenizerObject` type. Use method syntax to keep its native `this`
+context, and return `false` to use the built-in rule. Unlike
+`extensions`, returning `undefined` skips the built-in rule, which can
+silently drop paragraph wrappers. Both `render` and
+`renderSync` apply the overrides and sanitize their output. Callback
+errors reject `render` or throw from `renderSync`.
 
 Mermaid diagram rendering (fence interceptor + pan/zoom viewer) ships as
 an opt-in module on top of this hook — see
@@ -124,8 +175,10 @@ by DOMPurify regardless).
 - `<style>` elements are forbidden (`FORBID_TAGS`) — DOMPurify's defaults
   would let untrusted markdown inject document-wide CSS.
 - Inline `style` attributes are stripped everywhere **except** on
-  shiki-generated nodes: those are tagged with a per-render nonce and may
-  only carry `--shiki-*: #hex` declarations. A crafted document that
+  shiki-generated nodes: those are tagged with a per-render nonce and keep
+  only their `--shiki-*: #hex` declarations. Shiki's font hints, such as
+  `--shiki-light-font-weight: bold`, are dropped and the colors stay. A
+  crafted document that
   fakes `<pre class="shiki">` markup can't smuggle CSS — it lacks the
   nonce.
 - Any `<a>` that keeps a `target` attribute gets
@@ -134,6 +187,24 @@ by DOMPurify regardless).
   escapes the code text), so CodeBlock renders it without a DOMPurify
   pass.
 
+### Strict Content Security Policy
+
+Highlighting works in a page whose policy lacks `'unsafe-inline'` in
+`style-src` and `'wasm-unsafe-eval'` in `script-src`:
+
+- Shiki runs its JavaScript regex engine, so no WebAssembly compiles. Its
+  forgiving mode skips the rare grammar pattern the engine cannot
+  translate rather than failing the language.
+- Such a policy ignores the token colors' `style` attributes in inserted
+  markup. `Markdown` and `CodeBlock` re-apply them through CSSOM, which
+  the policy allows. If you insert `renderMarkdown` or `highlightCode`
+  output yourself, call `applyShikiStyles(container)` afterwards. It
+  applies only the `--shiki-*: #hex` declarations sanitization accepts.
+
+`tests/browser/strict-csp.spec.ts` serves a page under such a policy.
+Mermaid diagrams under such a policy, including how their styling is
+trusted, are covered in [mermaid.md](mermaid.md#strict-content-security-policy).
+
 ### Failure behavior
 
 Highlighting failures never reject: a failed shiki/theme chunk load
@@ -141,9 +212,16 @@ Highlighting failures never reject: a failed shiki/theme chunk load
 failed init isn't cached, so a later render retries. `highlightCode`
 resolves `null` on any failure. The `Markdown` component keeps the
 previous document and logs a `console.error` if rendering itself throws.
-The per-renderer cache holds raw→HTML promises and clears wholesale past
-500 entries; documents are typically small, but byte-bound your own layer
-if you render huge sources.
+The per-renderer cache holds raw→HTML promises within a budget of
+`8 * 1024 * 1024` source characters, measured by `raw.length` in UTF-16 code
+units. Hits refresh recency; new entries evict the least recently used
+sources individually. Sources larger than the budget render without
+caching. Failed renders leave the cache so later calls can retry. This
+budget measures source length only; rendered HTML and cache overhead use
+additional memory. A working set larger than the budget that is
+re-rendered in order, such as remounting an unvirtualized transcript,
+misses on every source; 8 Mi characters holds about 5,000 messages of
+1,600 source characters each.
 
 ### Highlighting budgets
 
@@ -160,8 +238,10 @@ grammar-fetch protection). Constants are exported
   per repo context; interactive task lists (checkbox indexes, drag
   handles) remain a Forge renderer concern layered on top. The block
   slicer (`renderMarkdownBlocks`) is Forge-specific and stays there.
-- **agentsview** `renderMarkdown(text)` → default renderer plus its
-  bash-wrapper tokenizer extensions via `extensions`; `asset://` URL
-  resolution stays an app-side pre-pass; per-message `CodeBlock` swaps to
+- **agentsview** currently uses its own renderer fork with bash-wrapper
+  extensions and built-in paragraph/HTML overrides. A migration would
+  pass those through `extensions` and `tokenizer`, respectively. Its custom XML
+  literal escaping and `asset://` URL resolution remain app-side until
+  separately ported; per-message `CodeBlock` swaps to
   kit-ui's (search-mark integration hooks pending the browser test infra
   work).

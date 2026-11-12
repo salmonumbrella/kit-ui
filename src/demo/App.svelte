@@ -14,6 +14,7 @@
     Toggle,
   } from "../lib/index.js";
   import AdaptiveActionGridDemo from "./pages/AdaptiveActionGridDemo.svelte";
+  import AppSidebarDemo from "./pages/AppSidebarDemo.svelte";
   import BottomDockDemo from "./pages/BottomDockDemo.svelte";
   import ButtonDemo from "./pages/ButtonDemo.svelte";
   import CalendarDemo from "./pages/CalendarDemo.svelte";
@@ -22,10 +23,13 @@
   import ChipDemo from "./pages/ChipDemo.svelte";
   import ChipStackDemo from "./pages/ChipStackDemo.svelte";
   import CodeBlockDemo from "./pages/CodeBlockDemo.svelte";
+  import ColorInputDemo from "./pages/ColorInputDemo.svelte";
   import ColorLabelDemo from "./pages/ColorLabelDemo.svelte";
+  import PaletteDemo from "./pages/PaletteDemo.svelte";
   import CommandPaletteDemo from "./pages/CommandPaletteDemo.svelte";
   import CopyButtonDemo from "./pages/CopyButtonDemo.svelte";
   import DetailDrawerDemo from "./pages/DetailDrawerDemo.svelte";
+  import DisclosureDemo from "./pages/DisclosureDemo.svelte";
   import EmptyStateDemo from "./pages/EmptyStateDemo.svelte";
   import FilterDropdownDemo from "./pages/FilterDropdownDemo.svelte";
   import FindBarDemo from "./pages/FindBarDemo.svelte";
@@ -42,12 +46,19 @@
   import MentionTextareaDemo from "./pages/MentionTextareaDemo.svelte";
   import MermaidDemo from "./pages/MermaidDemo.svelte";
   import MobileDemo from "./pages/MobileDemo.svelte";
+  import AppSidebarFrame from "./AppSidebarFrame.svelte";
   import MobileFrame from "./MobileFrame.svelte";
   import ModalDemo from "./pages/ModalDemo.svelte";
   import NoticeDemo from "./pages/NoticeDemo.svelte";
+  import SearchByMeaningDemo from "./pages/SearchByMeaningDemo.svelte";
+  import NumberInputDemo from "./pages/NumberInputDemo.svelte";
   import PageFrameDemo from "./pages/PageFrameDemo.svelte";
+  import PageHeaderDemo from "./pages/PageHeaderDemo.svelte";
+  import PanZoomDemo from "./pages/PanZoomDemo.svelte";
   import ProviderBrandDemo from "./pages/ProviderBrandDemo.svelte";
+  import DatePickerDemo from "./pages/DatePickerDemo.svelte";
   import DateRangePickerDemo from "./pages/DateRangePickerDemo.svelte";
+  import RadioGroupDemo from "./pages/RadioGroupDemo.svelte";
   import RefreshControlDemo from "./pages/RefreshControlDemo.svelte";
   import ScrollBoxDemo from "./pages/ScrollBoxDemo.svelte";
   import SegmentedControlDemo from "./pages/SegmentedControlDemo.svelte";
@@ -60,6 +71,7 @@
   import StatusDotDemo from "./pages/StatusDotDemo.svelte";
   import StructuredListDemo from "./pages/StructuredListDemo.svelte";
   import TableDemo from "./pages/TableDemo.svelte";
+  import TabsDemo from "./pages/TabsDemo.svelte";
   import TextInputDemo from "./pages/TextInputDemo.svelte";
   import TimelineDemo from "./pages/TimelineDemo.svelte";
   import ThemeDemo from "./pages/ThemeDemo.svelte";
@@ -71,6 +83,7 @@
   import TopBarDemo from "./pages/TopBarDemo.svelte";
   import TypeaheadDemo from "./pages/TypeaheadDemo.svelte";
   import VirtualListDemo from "./pages/VirtualListDemo.svelte";
+  import VirtualTableDemo from "./pages/VirtualTableDemo.svelte";
 
   interface Page {
     id: string;
@@ -81,6 +94,8 @@
   // ?mobile-frame renders the sample screen for the Mobile-preview iframes
   // instead of the gallery shell.
   const isMobileFrame = new URLSearchParams(location.search).has("mobile-frame");
+  // ?app-sidebar-frame renders the sample app for the AppSidebar iframes.
+  const isAppSidebarFrame = new URLSearchParams(location.search).has("app-sidebar-frame");
 
   // Gallery meta-pages stay pinned at the top; component pages below are
   // sorted alphabetically by label regardless of declaration order.
@@ -96,6 +111,7 @@
       label: "AdaptiveActionGrid",
       component: AdaptiveActionGridDemo,
     },
+    { id: "app-sidebar", label: "AppSidebar", component: AppSidebarDemo },
     { id: "bottom-dock", label: "BottomDock", component: BottomDockDemo },
     { id: "button", label: "Button", component: ButtonDemo },
     { id: "calendar", label: "Calendar", component: CalendarDemo },
@@ -104,10 +120,12 @@
     { id: "chip", label: "Chip", component: ChipDemo },
     { id: "chip-stack", label: "ChipStack", component: ChipStackDemo },
     { id: "code-block", label: "CodeBlock", component: CodeBlockDemo },
+    { id: "color-input", label: "ColorInput", component: ColorInputDemo },
     { id: "color-label", label: "ColorLabel", component: ColorLabelDemo },
     { id: "command-palette", label: "CommandPalette", component: CommandPaletteDemo },
     { id: "copy-button", label: "CopyButton", component: CopyButtonDemo },
     { id: "detail-drawer", label: "DetailDrawer", component: DetailDrawerDemo },
+    { id: "disclosure", label: "Disclosure", component: DisclosureDemo },
     { id: "empty-state", label: "EmptyState", component: EmptyStateDemo },
     { id: "filter-dropdown", label: "FilterDropdown", component: FilterDropdownDemo },
     { id: "find-bar", label: "FindBar", component: FindBarDemo },
@@ -125,9 +143,16 @@
     { id: "mermaid", label: "Mermaid", component: MermaidDemo },
     { id: "modal", label: "Modal", component: ModalDemo },
     { id: "notice", label: "Notice", component: NoticeDemo },
+    { id: "search-by-meaning", label: "Search by meaning", component: SearchByMeaningDemo },
+    { id: "number-input", label: "NumberInput", component: NumberInputDemo },
     { id: "page-frame", label: "PageFrame", component: PageFrameDemo },
+    { id: "page-header", label: "PageHeader", component: PageHeaderDemo },
+    { id: "palette", label: "Palette", component: PaletteDemo },
+    { id: "pan-zoom", label: "Pan and zoom", component: PanZoomDemo },
     { id: "provider-brand", label: "Provider brand", component: ProviderBrandDemo },
+    { id: "date-picker", label: "DatePicker", component: DatePickerDemo },
     { id: "date-range-picker", label: "DateRangePicker", component: DateRangePickerDemo },
+    { id: "radio-group", label: "RadioGroup", component: RadioGroupDemo },
     { id: "refresh-control", label: "RefreshControl", component: RefreshControlDemo },
     { id: "scroll-box", label: "ScrollBox", component: ScrollBoxDemo },
     { id: "segmented-control", label: "SegmentedControl", component: SegmentedControlDemo },
@@ -140,6 +165,7 @@
     { id: "status-dot", label: "StatusDot", component: StatusDotDemo },
     { id: "structured-list", label: "StructuredList", component: StructuredListDemo },
     { id: "table", label: "Table", component: TableDemo },
+    { id: "tabs", label: "Tabs", component: TabsDemo },
     { id: "text-input", label: "TextInput", component: TextInputDemo },
     { id: "timeline", label: "Timeline", component: TimelineDemo },
     { id: "toggle", label: "Toggle", component: ToggleDemo },
@@ -149,11 +175,22 @@
     { id: "top-bar", label: "TopBar", component: TopBarDemo },
     { id: "typeahead", label: "Typeahead", component: TypeaheadDemo },
     { id: "virtual-list", label: "VirtualList", component: VirtualListDemo },
+    { id: "virtual-table", label: "VirtualTable", component: VirtualTableDemo },
   ].sort((a, b) => a.label.localeCompare(b.label));
 
   const pages: Page[] = [...metaPages, ...componentPages];
 
-  let activeId = $state((typeof location !== "undefined" && location.hash.slice(1)) || "theme");
+  // In-page anchors (a Disclosure id, say) start with their page id, as in
+  // `disclosure-seats`. Resolving them to the page with the longest matching
+  // prefix keeps direct links, reloads, and Back on the page that owns them.
+  function pageForHash(hash: string): string {
+    if (!hash) return "theme";
+    if (pages.some((p) => p.id === hash)) return hash;
+    const owners = pages.filter((p) => hash.startsWith(`${p.id}-`));
+    return owners.sort((a, b) => b.id.length - a.id.length)[0]?.id ?? hash;
+  }
+
+  let activeId = $state(pageForHash(typeof location !== "undefined" ? location.hash.slice(1) : ""));
   let filter = $state("");
 
   initTheme();
@@ -176,10 +213,12 @@
   }
 </script>
 
-<svelte:window onhashchange={() => (activeId = location.hash.slice(1) || "theme")} />
+<svelte:window onhashchange={() => (activeId = pageForHash(location.hash.slice(1)))} />
 
 {#if isMobileFrame}
   <MobileFrame />
+{:else if isAppSidebarFrame}
+  <AppSidebarFrame />
 {:else}
   {@render gallery()}
 {/if}
@@ -366,7 +405,12 @@
   .content__body {
     flex: 1;
     overflow-y: auto;
+    /* Reserve the scrollbar's width up front so page content does not shift
+       when opening example code first makes the page scroll. */
+    scrollbar-gutter: stable;
     padding: 20px 32px 64px;
+    /* Table headers that stick to this scroller cover its top padding. */
+    --kit-table-sticky-top: -20px;
   }
 
   .content__heading {

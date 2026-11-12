@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  activityStep,
   formatDayLabel,
   formatMonthLabel,
   formatShortDate,
   formatWeekOfLabel,
   monthLabels,
+  periodBounds,
+  resolveRange,
+  monthGridDates,
   weekdayLabels,
 } from "../src/lib/components/date-range.js";
 
@@ -68,5 +72,59 @@ describe("date label locale", () => {
     const m = monthLabels("short", "en-US");
     m[0] = "corrupted";
     expect(monthLabels("short", "en-US")[0]).toBe("Jan");
+  });
+});
+
+// Week boundaries and grid must agree, including across a year boundary.
+test("Sunday-start calendar weeks and grid", () => {
+  expect(periodBounds("week", "2027-01-01", "sunday")).toEqual({
+    from: "2026-12-27",
+    to: "2027-01-02",
+  });
+  expect(periodBounds("week", "2027-01-03", "sunday")).toEqual({
+    from: "2027-01-03",
+    to: "2027-01-09",
+  });
+  expect(
+    resolveRange({ mode: "calendar", unit: "week", anchor: "2027-01-03" }, undefined, "sunday"),
+  ).toEqual({ from: "2027-01-03", to: "2027-01-09" });
+  expect(monthGridDates("2027-01-01", "sunday")[0]).toBe("2026-12-27");
+  expect(weekdayLabels("en-US", "sunday")).toEqual([
+    "Sun",
+    "Mon",
+    "Tue",
+    "Wed",
+    "Thu",
+    "Fri",
+    "Sat",
+  ]);
+  expect(weekdayLabels("en-US")[0]).toBe("Mon");
+});
+
+describe("activityStep", () => {
+  test("quarters of the busiest day, with any activity at least step 1", () => {
+    expect([0, 1, 3, 5, 6, 8, 12].map((count) => activityStep(count, 12))).toEqual([
+      0, 1, 1, 2, 2, 3, 4,
+    ]);
+    // No activity or no maximum gives step 0.
+    expect(activityStep(0, 0)).toBe(0);
+    expect(activityStep(3, 0)).toBe(0);
+    expect(activityStep(-2, 10)).toBe(0);
+    expect(activityStep(Number.NaN, 10)).toBe(0);
+    // A count above the maximum stays at step 4.
+    expect(activityStep(20, 10)).toBe(4);
+  });
+});
+
+describe("month strip inputs", () => {
+  test("narrow weekday labels follow the week start and locale", () => {
+    expect(weekdayLabels("en-US", "monday", "narrow")).toEqual(["M", "T", "W", "T", "F", "S", "S"]);
+    expect(weekdayLabels("en-US", "sunday", "narrow")).toEqual(["S", "M", "T", "W", "T", "F", "S"]);
+    expect(weekdayLabels("fr", "monday", "narrow")[0]).toBe("L");
+  });
+
+  test("short and narrow labels are cached separately", () => {
+    expect(weekdayLabels("en-US", "monday", "short")[0]).toBe("Mon");
+    expect(weekdayLabels("en-US", "monday", "narrow")[0]).toBe("M");
   });
 });

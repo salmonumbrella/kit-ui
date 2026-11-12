@@ -106,7 +106,7 @@
       {#if segment}
         {@render segment(option, option.value === value)}
       {:else}
-        {option.label}
+        <span class="kit-segmented__label" data-label={option.label}>{option.label}</span>
       {/if}
     </button>
   {/each}
@@ -123,11 +123,21 @@
     background: var(--bg-inset);
     border-radius: var(--kit-segmented-radius);
     padding: 2px;
+    box-shadow: var(--shadow-sunken, none);
   }
 
   .kit-segmented--block {
     display: flex;
     width: 100%;
+  }
+
+  /* A block track has a fixed width, and its labels are rem. When enlarged
+   * labels no longer fit one row, segments move to a second row and the
+   * track grows, instead of the last segment hanging out of the track.
+   * The borderless strip shares borders between neighbors, so it stays on
+   * one row. */
+  .kit-segmented--block:not(.kit-segmented--borderless) {
+    flex-wrap: wrap;
   }
 
   .kit-segmented__btn {
@@ -168,14 +178,18 @@
     padding-inline: 6px;
   }
 
+  /* The shared selected idiom (theme.css). It stays at full strength when
+   * the whole control is disabled, so a read-only setting still shows
+   * which option is chosen. */
   .kit-segmented__btn.active {
-    background: var(--bg-surface);
+    background: var(--selected-strong-bg);
     color: var(--text-primary);
-    box-shadow: var(--shadow-sm);
+    font-weight: var(--selected-strong-weight);
+    box-shadow: var(--shadow-raised, var(--selected-strong-edge));
   }
 
   .kit-segmented__btn:hover:not(.active):not(:disabled) {
-    color: var(--text-secondary);
+    color: var(--text-primary);
   }
 
   .kit-segmented__btn:focus-visible {
@@ -188,6 +202,10 @@
     cursor: not-allowed;
   }
 
+  .kit-segmented__btn.active:disabled {
+    opacity: 1;
+  }
+
   /* Borderless (flat strip) variant: flush segments sharing hairline
    * borders. Each segment owns its border so a segment's border area can
    * take its own tone (the Modal band principle) — the outer border is
@@ -197,9 +215,11 @@
    * (segments after the first drop their left border, so nothing
    * overlaps by default). */
   .kit-segmented--borderless {
+    --kit-segmented-selected-weight: var(--font-weight-semibold, 600);
     gap: 0;
     padding: 0;
     background: transparent;
+    box-shadow: none;
   }
 
   .kit-segmented--borderless .kit-segmented__btn {
@@ -244,13 +264,35 @@
     color: color-mix(in srgb, var(--kit-tone) 72%, var(--text-secondary));
   }
 
+  /* The label stacks over a hidden copy at the selected weight, so a segment
+   * is as wide chosen as not and choosing one never shifts its neighbours.
+   * The second content declaration keeps the copy out of the accessible
+   * name; a browser without that syntax keeps the first, and visibility
+   * hidden does the same job. */
+  .kit-segmented__label {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .kit-segmented__label::after {
+    content: attr(data-label);
+    content: attr(data-label) / "";
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+    font-weight: var(--kit-segmented-selected-weight, var(--selected-strong-weight));
+    user-select: none;
+    pointer-events: none;
+  }
+
   /* Active fill is 12% toward transparent (not the 9%-toward-surface band
    * recipe): segments sit on arbitrary surfaces, so the tint must let the
    * underlying background through. */
   .kit-segmented--borderless .kit-segmented__btn.active {
     background: color-mix(in srgb, var(--kit-tone, var(--accent-blue)) 12%, transparent);
     color: color-mix(in srgb, var(--kit-tone, var(--accent-blue)) 72%, var(--text-primary));
-    font-weight: var(--font-weight-semibold, 600);
+    font-weight: var(--kit-segmented-selected-weight);
     border-color: color-mix(
       in srgb,
       var(--kit-tone, var(--accent-blue)) 30%,

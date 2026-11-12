@@ -4,7 +4,7 @@
  * frontend/src/lib/api/docs/markdown.ts and agentsview's renderer; the app-specific
  * pieces those carried (issue/PR reference linking, bash-wrapper tags,
  * interactive task lists) stay app-side, injected through the
- * `extensions` / `codeFence` options instead of being baked in.
+ * `extensions`, `tokenizer`, and `codeFence` options.
  *
  * Highlighting is dual-theme: shiki emits `--shiki-light`/`--shiki-dark`
  * per-token CSS variables (no baked colors) and the component styles
@@ -17,6 +17,11 @@
  * `--shiki-*` custom-property declarations with hex-color values — a
  * crafted markdown document can't smuggle arbitrary CSS through the
  * highlighter's style channel.
+ *
+ * Strict Content Security Policies work too. Shiki uses its JavaScript
+ * regex engine, so no WebAssembly compiles, and `applyShikiStyles`
+ * re-applies the token colors through CSSOM after the markup is inserted,
+ * because such a policy ignores `style` attributes parsed from markup.
  */
 
 import DOMPurify from "dompurify";
@@ -26,14 +31,21 @@ import {
   type RendererObject,
   type Tokens,
   type TokenizerAndRendererExtension,
+  type TokenizerObject,
 } from "marked";
-import { getSingletonHighlighter, type BundledLanguage, type Highlighter } from "shiki";
+import {
+  createJavaScriptRegexEngine,
+  getSingletonHighlighter,
+  type BundledLanguage,
+  type Highlighter,
+} from "shiki";
 
 const SHIKI_LIGHT_THEME = "github-light-default";
 const SHIKI_DARK_THEME = "github-dark-default";
 const SHIKI_THEMES = { light: SHIKI_LIGHT_THEME, dark: SHIKI_DARK_THEME } as const;
 const SHIKI_PLAINTEXT_LANG = "text";
 const SHIKI_GENERATED_ATTR = "data-kit-shiki";
+const MARKDOWN_CACHE_MAX_SOURCE_CHARACTERS = 8 * 1024 * 1024;
 
 // Highlighting budgets per document — beyond these, remaining fences
 // render as escaped plain text instead of stalling the main thread or
@@ -50,6 +62,10 @@ function getShikiHighlighter(): Promise<Highlighter> {
   shikiHighlighterPromise ??= getSingletonHighlighter({
     themes: [SHIKI_LIGHT_THEME, SHIKI_DARK_THEME],
     langs: [],
+    // WebAssembly needs 'wasm-unsafe-eval' in a page's script-src. The
+    // JavaScript engine needs nothing; `forgiving` skips the few grammar
+    // patterns it cannot translate instead of failing the language.
+    engine: createJavaScriptRegexEngine({ forgiving: true }),
   }).then(
     (highlighter) => {
       shikiHighlighter = highlighter;
@@ -100,21 +116,36 @@ function shikiNonce(): string {
 const SHIKI_STYLE_PROPERTY = /^--shiki-(?:light|dark)(?:-bg)?$/;
 const SHIKI_STYLE_VALUE = /^#[0-9a-fA-F]{3,8}$/;
 
-/** True when a style attribute contains only `--shiki-*: #hex`
- * declarations — the only inline styles sanitization lets through. */
-export function shikiStyleIsAllowed(value: string): boolean {
-  const declarations = value
+/** The `--shiki-*: #hex` declarations in a style attribute, which are the
+ * only inline styles sanitization lets through. Shiki also emits font hints
+ * such as `--shiki-light-font-weight:bold` beside a token's colors; those
+ * and anything else are dropped, so the colors survive. Empty when nothing
+ * is allowed. */
+export function allowedShikiStyle(value: string): string {
+  return value
     .split(";")
     .map((declaration) => declaration.trim())
-    .filter(Boolean);
-  if (declarations.length === 0) return false;
-  return declarations.every((declaration) => {
-    const separator = declaration.indexOf(":");
-    if (separator <= 0) return false;
-    const property = declaration.slice(0, separator).trim();
-    const styleValue = declaration.slice(separator + 1).trim();
-    return SHIKI_STYLE_PROPERTY.test(property) && SHIKI_STYLE_VALUE.test(styleValue);
-  });
+    .filter((declaration) => {
+      const separator = declaration.indexOf(":");
+      if (separator <= 0) return false;
+      const property = declaration.slice(0, separator).trim();
+      const styleValue = declaration.slice(separator + 1).trim();
+      return SHIKI_STYLE_PROPERTY.test(property) && SHIKI_STYLE_VALUE.test(styleValue);
+    })
+    .join(";");
+}
+
+/** Re-apply Shiki's token colors under `root` through CSSOM. A Content
+ * Security Policy without 'unsafe-inline' in style-src ignores `style`
+ * attributes parsed from markup but allows styles set through CSSOM. Only
+ * declarations that `allowedShikiStyle` keeps are applied, so this cannot
+ * widen what sanitization let through. Call it after inserting highlighted
+ * markup; `Markdown` and `CodeBlock` do. */
+export function applyShikiStyles(root: ParentNode): void {
+  for (const element of root.querySelectorAll<HTMLElement>("pre.shiki[style], pre.shiki [style]")) {
+    const value = allowedShikiStyle(element.getAttribute("style") ?? "");
+    if (value) element.style.cssText = value;
+  }
 }
 
 function utf8ByteLength(value: string): number {
@@ -234,6 +265,87 @@ export async function highlightCode(code: string, lang: string): Promise<string 
   }
 }
 
+/** GitHub alert kinds: a blockquote whose first line is `[!NOTE]`,
+ * `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, or `[!CAUTION]`. */
+export type MarkdownAlertKind = "note" | "tip" | "important" | "warning" | "caution";
+
+export const DEFAULT_MARKDOWN_ALERT_LABELS: Record<MarkdownAlertKind, string> = {
+  note: "Note",
+  tip: "Tip",
+  important: "Important",
+  warning: "Warning",
+  caution: "Caution",
+};
+
+// The marker must sit alone on the blockquote's first line, as on GitHub;
+// `> [!NOTE] text` stays an ordinary quote.
+const MARKDOWN_ALERT_MARKER = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*(?:\n|$)/i;
+
+type AlertBlockquote = Tokens.Blockquote & { kitAlert?: MarkdownAlertKind };
+
+/** Turn top-level alert blockquotes into alert tokens: tag the kind and
+ * drop the marker. GitHub renders alerts only at the top level, so quotes
+ * nested in lists or other quotes are left alone. The marker is cut from
+ * the already-lexed inline tokens rather than re-lexing the paragraph, so
+ * reference links resolved against the whole document keep working.
+ * Exported for tests. */
+export function applyMarkdownAlerts(tokens: Tokens.Generic[]): void {
+  for (const token of tokens) {
+    if (token.type !== "blockquote") continue;
+    const quote = token as AlertBlockquote;
+    const first = quote.tokens[0];
+    if (first?.type !== "paragraph") continue;
+    const match = MARKDOWN_ALERT_MARKER.exec(first.raw);
+    if (!match) continue;
+    const paragraph = first as Tokens.Paragraph;
+    const lead = paragraph.tokens[0];
+    const marker = `[!${match[1]}]`;
+    if (
+      lead?.type !== "text" ||
+      lead.raw.slice(0, marker.length).toUpperCase() !== marker.toUpperCase()
+    ) {
+      continue;
+    }
+    quote.kitAlert = match[1]!.toLowerCase() as MarkdownAlertKind;
+    // With `breaks`, the marker line ends in its own `br` token; without,
+    // the newline is part of the lead text.
+    const rest = lead.raw.slice(marker.length).replace(/^[ \t]*\n?/, "");
+    if (rest) {
+      lead.raw = rest;
+      (lead as Tokens.Text).text = rest;
+    } else {
+      paragraph.tokens.shift();
+      if (paragraph.tokens[0]?.type === "br") paragraph.tokens.shift();
+    }
+    paragraph.raw = paragraph.raw.slice(match[0].length);
+    paragraph.text = paragraph.text.replace(MARKDOWN_ALERT_MARKER, "");
+    if (paragraph.tokens.length === 0) quote.tokens.shift();
+  }
+}
+
+// A missing, undefined, or blank override keeps the English default, so a
+// partial label map can never leave an alert without a title.
+function alertLabel(
+  labels: MarkdownRendererOptions["alertLabels"],
+  kind: MarkdownAlertKind,
+): string {
+  return labels?.[kind]?.trim() || DEFAULT_MARKDOWN_ALERT_LABELS[kind];
+}
+
+function alertRenderer(labels: MarkdownRendererOptions["alertLabels"]): RendererObject {
+  return {
+    blockquote(token) {
+      const kind = (token as AlertBlockquote).kitAlert;
+      if (!kind) return false;
+      return (
+        `<div class="kit-markdown-alert kit-markdown-alert--${kind}" role="note">` +
+        `<p class="kit-markdown-alert__title">${escapeHtml(alertLabel(labels, kind))}</p>` +
+        `${this.parser.parse(token.tokens)}</div>\n`
+      );
+    },
+  };
+}
+
 export interface MarkdownRendererOptions {
   /** Turn source newlines into hard breaks (default true). Set false
    * for standard Markdown soft breaks in prose. */
@@ -241,6 +353,12 @@ export interface MarkdownRendererOptions {
   /** Custom marked tokenizer/renderer extensions — the injection point
    * for app-specific syntax (issue references, wrapper tags). */
   extensions?: TokenizerAndRendererExtension[];
+  /** Built-in marked tokenizer overrides (paragraph, html, etc.). Use
+   * method syntax for Marked's native `this` context; return false to
+   * fall back to the built-in tokenizer (undefined skips it). Output
+   * is still sanitized.
+   * Callback errors reject `render` or throw from `renderSync`. */
+  tokenizer?: TokenizerObject;
   /** Intercept specific fences (mermaid diagrams, custom viewers):
    * return HTML for the block or undefined to fall through to
    * highlighting. Contract: the returned string is markup, so the
@@ -253,6 +371,12 @@ export interface MarkdownRendererOptions {
   /** Extra attributes sanitization should keep (e.g. `data-*` attributes
    * your extensions emit). `target` is always allowed. */
   allowedAttributes?: string[];
+  /** Render GitHub alert blockquotes (`> [!NOTE]`) as toned callouts
+   * (default true). Set false to keep them as plain quotes. */
+  alerts?: boolean;
+  /** Visible alert titles, for localization. Missing kinds keep the
+   * English default. */
+  alertLabels?: Partial<Record<MarkdownAlertKind, string>>;
 }
 
 export interface MarkdownRenderer {
@@ -307,9 +431,9 @@ const shikiStyleSanitizer: UponSanitizeAttributeHook = (node, data) => {
     trustedShikiNode &&
     ((tagName === "pre" && node.classList.contains("shiki")) ||
       (tagName === "span" && node.closest("pre.shiki")));
-  if (!isStyledShikiNode || !shikiStyleIsAllowed(data.attrValue)) {
-    data.keepAttr = false;
-  }
+  const allowed = isStyledShikiNode ? allowedShikiStyle(data.attrValue) : "";
+  if (allowed) data.attrValue = allowed;
+  else data.keepAttr = false;
 };
 
 // Any element that keeps a target (e.g. target="_blank" emitted by an
@@ -345,13 +469,20 @@ function sanitizeMarkdownHtml(html: string, allowedAttributes: string[]): string
 
 /** Build a renderer with app-specific options. Create one per app (or
  * per distinct option set) and reuse it — each instance owns a Marked
- * instance and an LRU-ish render cache. */
+ * instance and an LRU render cache bounded by 8 * 1024 * 1024 source
+ * characters, measured by string.length in UTF-16 code units. */
 export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): MarkdownRenderer {
   const marked = new Marked({ gfm: true, breaks: options.breaks ?? true });
   if (options.extensions?.length) {
     marked.use({ extensions: options.extensions });
   }
-  marked.use({ renderer: codeRenderer });
+  marked.use({ tokenizer: options.tokenizer, renderer: codeRenderer });
+  const alerts = options.alerts ?? true;
+  if (alerts) {
+    marked.use({
+      renderer: alertRenderer(options.alertLabels),
+    });
+  }
   // Enforce the documented constraint: only inert data-* attributes may
   // widen the sanitizer. URL-bearing or style attributes here would
   // reopen exactly the holes sanitization exists to close.
@@ -363,6 +494,7 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
     return false;
   });
   const cache = new Map<string, Promise<string>>();
+  let cacheSourceCharacters = 0;
 
   function renderTokens(
     tokens: Tokens.Generic[],
@@ -387,9 +519,14 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
     async render(raw: string): Promise<string> {
       if (!raw) return "";
       const cached = cache.get(raw);
-      if (cached !== undefined) return cached;
+      if (cached !== undefined) {
+        cache.delete(raw);
+        cache.set(raw, cached);
+        return cached;
+      }
       const html = (async () => {
         const tokens = marked.lexer(raw) as Tokens.Generic[];
+        if (alerts) applyMarkdownAlerts(tokens);
         const skip = options.codeFence
           ? (code: string, lang: string) => options.codeFence!(code, lang) !== undefined
           : undefined;
@@ -397,15 +534,32 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
         await loadCodeFenceLanguages(plan.languages);
         return renderTokens(tokens, plan.tokens);
       })();
-      if (cache.size > 500) cache.clear();
-      cache.set(raw, html);
-      html.catch(() => cache.delete(raw));
+      // Count source characters using string.length, in UTF-16 code units.
+      // Oversized sources still render, but leave the working set intact.
+      const sourceCharacters = raw.length;
+      if (sourceCharacters <= MARKDOWN_CACHE_MAX_SOURCE_CHARACTERS) {
+        while (cacheSourceCharacters + sourceCharacters > MARKDOWN_CACHE_MAX_SOURCE_CHARACTERS) {
+          const oldest = cache.keys().next().value!;
+          cache.delete(oldest);
+          cacheSourceCharacters -= oldest.length;
+        }
+        cache.set(raw, html);
+        cacheSourceCharacters += sourceCharacters;
+        html.catch(() => {
+          // An evicted render may fail after the same source was cached again.
+          if (cache.get(raw) === html) {
+            cache.delete(raw);
+            cacheSourceCharacters -= sourceCharacters;
+          }
+        });
+      }
       return html;
     },
 
     renderSync(raw: string): string {
       if (!raw) return "";
       const tokens = marked.lexer(raw) as Tokens.Generic[];
+      if (alerts) applyMarkdownAlerts(tokens);
       const skip = options.codeFence
         ? (code: string, lang: string) => options.codeFence!(code, lang) !== undefined
         : undefined;

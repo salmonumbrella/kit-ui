@@ -16,7 +16,10 @@
     tone?: ModalTone;
     /** Called when the user dismisses via Escape, overlay click, or the close button. */
     onclose?: () => void;
-    /** Render the X button in the header. */
+    /** Render the X button in the header. Defaults to true without a footer
+     * and false with one: a footer carries its own way out, such as Cancel,
+     * and a second control that does the same is noise. Escape and the
+     * backdrop still dismiss either way. */
     closable?: boolean;
     /** Accessible label for the close button. */
     closeLabel?: string;
@@ -38,7 +41,7 @@
     title = undefined,
     tone = "neutral",
     onclose = undefined,
-    closable = true,
+    closable = undefined,
     closeLabel = "Close",
     closeOnOverlayClick = true,
     width = "auto",
@@ -50,6 +53,7 @@
   }: Props = $props();
 
   const close = () => onclose?.();
+  const showClose = $derived(closable ?? !footer);
 </script>
 
 <svelte:window onkeydown={escapeCloses(close)} />
@@ -66,18 +70,18 @@
     aria-label={ariaLabel ?? title}
     tabindex="-1"
     data-kit-tone={tone === "neutral" ? undefined : tone}
-    class:kit-modal-panel--headered={!!title || closable}
+    class:kit-modal-panel--headered={!!title || showClose}
     style:width
     style:max-width={maxWidth}
     style:max-height={maxHeight}
     {@attach trapFocus}
   >
-    {#if title || closable}
+    {#if title || showClose}
       <div class="kit-modal-header">
         {#if title}
           <span class="kit-modal-title">{title}</span>
         {/if}
-        {#if closable}
+        {#if showClose}
           <IconButton
             size="sm"
             class="kit-modal-close"
@@ -89,11 +93,11 @@
         {/if}
       </div>
     {/if}
-    <div class="kit-modal-body">
-      {#if children}
+    {#if children}
+      <div class="kit-modal-body">
         {@render children()}
-      {/if}
-    </div>
+      </div>
+    {/if}
     {#if footer}
       <div class="kit-modal-footer">
         {@render footer()}
@@ -115,11 +119,14 @@
     z-index: var(--z-overlay);
   }
 
+  /* A modal is a transient floating surface, so it takes the popover
+   * surface and edge: the plain surface in light, a lighter one in dark,
+   * where it would otherwise sit dimmer than a menu behind the scrim. */
   .kit-modal-panel {
-    background: var(--bg-surface);
-    border: var(--border-width) solid var(--border-default);
+    background: var(--bg-popover);
+    border: var(--border-width) solid var(--border-popover);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-lg);
     /* No overflow: hidden — the header must be able to overlay the
      * panel's border (see the band comment below); children clip their
      * own corners instead. */
@@ -157,7 +164,7 @@
      * as a bug (the tone applies to the toned region's whole border
      * area, same principle as the borderless SegmentedControl). */
     margin: calc(-1 * var(--border-width)) calc(-1 * var(--border-width)) 0;
-    border: var(--border-width) solid var(--border-default);
+    border: var(--border-width) solid var(--border-popover);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     flex-shrink: 0;
   }
@@ -169,6 +176,13 @@
     color: var(--text-primary);
   }
 
+  /* The panel takes focus only so keyboard focus starts inside the dialog;
+   * it is not a control, so it keeps its border instead of a focus ring.
+   * Controls inside keep theirs. */
+  .kit-modal-panel:focus-visible {
+    outline: none;
+  }
+
   /* Tinted header bands for semantic tones: the panel's data-kit-tone
    * opts into the shared tone map + band recipe in theme.css (9% band,
    * 30% border, 72% AA-safe ink — rationale documented there), and the
@@ -177,6 +191,15 @@
    * Tone reaches the band's full border area (top, sides, and the
    * divider below) via the header's own border. Headerless toned modals
    * render no header element, so no stray colored edge. */
+  .kit-modal-panel[data-kit-tone] {
+    /* The shared recipe mixes over the plain surface and default border.
+     * The panel is the popover surface, so the band mixes over that; a
+     * band mixed over the plain surface would sit darker than a dark
+     * panel. Same 9% and 30% ratios. */
+    --kit-tone-band-bg: color-mix(in srgb, var(--kit-tone) 9%, var(--bg-popover));
+    --kit-tone-border: color-mix(in srgb, var(--kit-tone) 30%, var(--border-popover));
+  }
+
   .kit-modal-panel[data-kit-tone] .kit-modal-header {
     background: var(--kit-tone-band-bg);
     border-color: var(--kit-tone-border);
@@ -206,6 +229,13 @@
     margin-right: calc(var(--space-3) - var(--space-6));
   }
 
+  /* A title-only confirmation has nothing to say in its body, and a body whose
+   * content is all conditional can render nothing; either way no empty band
+   * sits between the header and the footer. */
+  .kit-modal-body:empty {
+    display: none;
+  }
+
   .kit-modal-body {
     padding: 16px;
     overflow-y: auto;
@@ -232,7 +262,7 @@
     justify-content: flex-end;
     gap: 8px;
     padding: 12px 16px;
-    border-top: 1px solid var(--border-default);
+    border-top: 1px solid var(--border-popover);
     flex-shrink: 0;
   }
 </style>

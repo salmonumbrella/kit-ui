@@ -45,7 +45,7 @@ const off = appShortcuts.register("mod+k", openPalette, {
   function pops it (out-of-order pops are safe). Modal-like components
   should push a scope while open — CommandPalette does.
 - **Display**: `formatShortcutKeys("mod+k")` → `["⌘", "K"]` / `["Ctrl",
-"K"]` for [KbdBadge](kbd-badge.md).
+  "K"]` for [KbdBadge](kbd-badge.md), with each key in its own cap.
 - `createShortcutManager()` builds an isolated manager (embedded surfaces,
   tests); `appShortcuts` is the app-level singleton `initShortcuts()`
   wires to `window`. `initShortcuts()` is idempotent — repeat calls while
@@ -75,35 +75,64 @@ const off = appShortcuts.register("mod+k", openPalette, {
 
 ### Props
 
-| Prop          | Type                                | Default                  | Notes                                                                 |
-| ------------- | ----------------------------------- | ------------------------ | --------------------------------------------------------------------- |
-| `open`        | `boolean` (bindable)                | `false`                  |                                                                       |
-| `commands`    | `PaletteCommand[]`                  | required                 | `{ id, label, section?, keywords?, combo?, disabled? }`               |
-| `onrun`       | `(command: PaletteCommand) => void` | required                 | Palette closes, then runs                                             |
-| `recentIds`   | `string[]`                          | `[]`                     | Shown under `recentLabel` while the query is empty (app owns recency) |
-| `placeholder` | `string`                            | `"Type a command…"`      |                                                                       |
-| `emptyLabel`  | `string`                            | `"No matching commands"` |                                                                       |
-| `recentLabel` | `string`                            | `"Recent"`               |                                                                       |
-| `ariaLabel`   | `string`                            | `"Command palette"`      | Dialog + listbox label                                                |
-| `class`       | `string`                            | `""`                     |                                                                       |
+| Prop            | Type                                               | Default                  | Notes                                                                                    |
+| --------------- | -------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------- |
+| `open`          | `boolean` (bindable)                               | `false`                  |                                                                                          |
+| `commands`      | `PaletteCommand[]`                                 | required                 | `{ id, label, section?, keywords?, combo?, disabled?, icon?, children?: PaletteLeaf[] }` |
+| `onrun`         | `(command: PaletteCommand, query: string) => void` | required                 | Palette closes, then runs the leaf command                                               |
+| `initialQuery`  | `string`                                           | `""`                     | Seeds the search on every open; typing stays local                                       |
+| `fallbacks`     | `(query: string) => PaletteLeaf[]`                 |                          | Receives the trimmed, non-empty query                                                    |
+| `recentIds`     | `string[]`                                         | `[]`                     | Shown under `recentLabel` while the query is empty (app owns recency)                    |
+| `placeholder`   | `string`                                           | `"Type a command…"`      |                                                                                          |
+| `emptyLabel`    | `string`                                           | `"No matching commands"` |                                                                                          |
+| `recentLabel`   | `string`                                           | `"Recent"`               |                                                                                          |
+| `navigateLabel` | `string`                                           | `"navigate"`             | Footer navigation label                                                                  |
+| `runLabel`      | `string`                                           | `"run"`                  | Footer run label                                                                         |
+| `closeLabel`    | `string`                                           | `"close"`                | Footer close label                                                                       |
+| `ariaLabel`     | `string`                                           | `"Command palette"`      | Dialog + listbox label                                                                   |
+| `class`         | `string`                                           | `""`                     |                                                                                          |
 
 ### Behavior
 
+- Commands accept an `icon` component, such as a Lucide icon, rendered at 16px.
+  Every row reserves the 16px icon column.
+- The borderless search row is 48px tall, command rows are at least 36px tall,
+  and only the results list scrolls. Shortcut badges stay right-aligned.
+  The search field shows no focus ring inside the palette.
+  A 32px footer shows ↑↓ navigate, ↵ run, and esc close.
+  Assistive technology ignores the footer. Coarse pointers hide it alongside key badges.
 - Filtering ranks label **prefix** over label **substring** over
   **keyword** matches. Each section then appears **once**, ordered by its
   best-ranked match, with ranking preserved within the section — a
   section never repeats across rank buckets.
-- ↑/↓ move (skipping disabled), Enter runs, pointer hover highlights,
-  click runs. When results change, the highlight lands on the **first
+- Running a parent opens its children and keeps the palette open without calling `onrun`.
+  Its label stays visible in a truncated chip and becomes the listbox name. The search placeholder is empty while the group is open.
+  Clicking or tapping the chip returns to the root; it stays out of the tab order.
+  Entering or leaving a child list scrolls the list to the top.
+  Root search and `recentIds` also reach children, with the group label before the child label, such as "Group by… › Source". Use bare dimensions as child labels: "account", "Source", and "Date". Inside the group, rows show only the child label. Searching "source" at the root finds both "Sources" and "Group by… › Source" in the demo. A child without its own section
+  takes its parent's section in root results and in the child list. A disabled parent
+  also disables its children, including in root search and Recent. Command ids
+  must be globally unique. Reopening starts at the root.
+- Matched label characters are bold. Keyword-only matches stay plain.
+- Fallback rows appear only at the root and follow all matches, grouped by their own sections. A fallback
+  section that repeats a command section shows its header again after the matches.
+  Fallbacks share keyboard navigation and disabled handling, stay plain, and skip
+  ids already listed among the matches or earlier fallback rows. The first row for
+  each id wins. Apps must keep fallback rows out of Recent.
+- `initialQuery` seeds the search on every open. `onrun` receives the trimmed
+  search text as its second argument.
+- ↑/↓ move (skipping disabled), Enter runs, pointer movement highlights,
+  click runs. On every open and when results change, the highlight lands on the **first
   enabled** command (disabled leading results are skipped so Enter always
   has a runnable target). Escape follows SearchInput semantics: clears
-  the query first, closes when already empty.
+  the query first, returns to the root from a child list, then closes.
+  Backspace in an empty search returns from a child list to the root and keeps focus in the search field.
 - While open it pushes an `appShortcuts` scope, so page-level shortcuts
   are suspended (registry-driven ones — its own keys are DOM handlers).
 - Overlay + `trapFocus` + `aria-modal`; the query field autofocuses.
 - `combo` values render as platform-correct KbdBadges via
-  `formatShortcutKeys` — the palette does **not** register them; the app
-  owns actual shortcut registration.
+  `formatShortcutKeys`, with each key in its own cap. The app registers
+  the shortcuts.
 - The palette closes **before** `onrun` fires; exceptions thrown by
   `onrun` propagate to the caller (the palette stays closed).
 - Recents are app-owned (`recentIds` in, updated by your `onrun`) — the

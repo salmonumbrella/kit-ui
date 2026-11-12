@@ -10,8 +10,8 @@ colors:
   edge-default: "#d8dae2"
   edge-muted: "#e4e6ec"
   ink-primary: "#181b24"
-  ink-secondary: "#555b6e"
-  ink-muted: "#878ea0"
+  ink-secondary: "#474d5f"
+  ink-muted: "#62687c"
   signal-amber: "#d97706"
   workflow-violet: "#7c3aed"
   confirm-green: "#059669"
@@ -123,7 +123,7 @@ Tinted cool-grey neutrals with a restrained six-accent semantic vocabulary; the 
 - **Hover Wash** (#f0f1f4): the universal hover tint (`--bg-surface-hover`).
 - **Inset Well** (#ecedf2): recessed regions — wells, secondary button fills (`--bg-inset`).
 - **Edge Default / Edge Muted** (#d8dae2 / #e4e6ec): structural 1px borders and quieter dividers.
-- **Ink Primary / Secondary / Muted** (#181b24 / #555b6e / #878ea0): three-step text hierarchy.
+- **Ink Primary / Secondary / Muted** (#181b24 / #474d5f / #62687c): three-step text hierarchy. Muted still carries text (placeholders, metadata), so it clears 4.5:1 on every neutral fill in both themes.
 
 ### Secondary
 
@@ -165,15 +165,27 @@ Tinted cool-grey neutrals with a restrained six-accent semantic vocabulary; the 
 
 Borders first, shadows whisper. Resting structure is drawn entirely with 1px borders and tonal background steps (fog → paper → well). Shadows exist only to lift **transient** surfaces off the page: popovers, dropdowns, modals, tooltips. Nothing at rest casts a shadow heavier than `--shadow-sm`.
 
+Themes may opt into resting depth with the depth tokens (`--shadow-raised`,
+`--shadow-raised-solid`, `--shadow-sunken`, `--shadow-panel`,
+`--bg-table-header`, `--edge-highlight`, `--bg-raised`; see docs/theming.md).
+The shadow tokens build on `--shadow-sm`: a top highlight, a hairline ring, or
+the same shadow turned inward, never a heavier drop shadow, so the rule above
+still holds. A theme that lights the top edge softens it on solid buttons with
+`--shadow-raised-solid`, so it reads as a sheen, not a bright line across a
+saturated fill. Where the well is darker than the page, as in a dark palette,
+`--bg-raised` fills raised controls lighter than the surface they sit on, so a
+raised control never reads as a well. The default pair leaves the tokens off, so
+its resting surfaces keep today's look.
+
 ### Shadow Vocabulary
 
 - **shadow-sm** (`0 1px 2px rgba(0,0,0,0.05)`): resting cards that genuinely need lift.
 - **shadow-md** (`0 2px 8px rgba(0,0,0,0.08)`): sticky chrome, drag states.
-- **shadow-lg** (`0 4px 16px rgba(0,0,0,0.1)`): the popover card, modals — every transient floating surface.
+- **shadow-lg** (`0 12px 32px` + `0 2px 6px`, cool-tinted at 14% / 8%): the popover card, modals — every transient floating surface. It is soft and wide so a popover lifts off white cards without a hard edge. In dark the shadow barely shows on the near-black page, so popovers also step up to a lighter surface (`--bg-popover`) and edge (`--border-popover`).
 
 ### Named Rules
 
-**The One-Card Rule.** Every floating surface uses `.kit-popover-card` (surface bg, 1px default border, md radius, lg shadow). Hand-rolled copies are flagged by `kit-ui-check`.
+**The One-Card Rule.** Every floating surface uses `.kit-popover-card` (`--bg-popover` fill, 1px `--border-popover` edge, md radius, lg shadow; the popover tokens equal the surface and default border in light and step lighter in dark). Hand-rolled copies are flagged by `kit-ui-check`. The Modal panel keeps its own larger radius but takes the same fill and edge. Inside either surface in dark, `--bg-surface-hover` steps up from `--bg-popover`, so hover still lightens.
 
 ## 5. Components
 
@@ -185,6 +197,12 @@ Borders first, shadows whisper. Resting structure is drawn entirely with 1px bor
 - **Hover / Focus:** 0.12s background/border/color transitions; keyboard focus is the global 2px Action Blue outline ring, 1px offset; press nudges `translateY(1px)`.
 - **Tones × surfaces:** neutral/success/danger/info/workflow × outline/soft/solid, all derived from accent tokens through the shared tone mixes.
 - **Structural controls:** Keep the native element in the owning component and add `kit-control-states` for shared disabled and pressed behavior. Consumers own the control's geometry and use theme tokens for resting and hover styles.
+
+### Selected state
+
+- **Choice groups** (SegmentedControl, DateRangePicker's mode tabs, TopBar tabs): the chosen option is one raised pill from the `--selected-strong-*` tokens: the white surface lifted by a hairline and a soft shadow in light, and a lighter fill with a faint edge in dark. Selected text is primary ink at medium weight. Inside a dark popover the pill steps up again so it still stands out on the lighter popover surface.
+- **Sub-choices** (DateRangePicker's presets under its mode tabs): a lower tier tucked flush under the tabs, square on top and inset so the tabs overhang it, with a contact line and a quieter fill. Its options use the same selected pill, and hierarchy comes from a step down in height, type, and inset.
+- **Navigation rows** (SettingsLayout, AppSidebar) keep Action Blue ink for the current row; `--selected-list-bg` fills it.
 
 ### Chips
 
@@ -205,7 +223,7 @@ Borders first, shadows whisper. Resting structure is drawn entirely with 1px bor
 
 ### Navigation
 
-- **Style:** 44px TopBar and 24px StatusBar chrome; sidebar links are quiet text rows that gain Hover Wash, with the active row carrying a 12% Action Blue tint.
+- **Style:** 44px TopBar and 24px StatusBar chrome; sidebar links are quiet text rows that gain Hover Wash. In AppSidebar the brand row is as tall as the TopBar, so a brand lines up with the bar beside it; the current row keeps that wash, the current section's icon turns Action Blue, and the current view gains a 2px Action Blue indicator on its leading edge. `aria-current="page"` marks the current section or view, and `aria-current="true"` marks a section whose view is current.
 
 ### StatusDot (signature)
 
@@ -224,7 +242,8 @@ Session-state at a glance: a colored dot plus a distinct "waiting for user" bubb
 ### Don't:
 
 - **Don't** touch the default light/dark palettes when adding themes; alternate identities live in `themes.css` under `data-kit-theme`.
-- **Don't** use side-stripe `border-left` accents, gradient text, glassmorphism, hero-metric layouts, or identical icon-card grids.
+- **Don't** put a side-stripe accent (a thick side border or sideways inset shadow) on rounded corners, where it bends around the curve; square that edge (`kit-ui-check`'s `rounded-side-stripe` rule enforces this). Don't use gradient text, glassmorphism, hero-metric layouts, or identical icon-card grids.
 - **Don't** write type media queries in components or pin the root font size in apps.
 - **Don't** draw keyboard focus with `box-shadow`; it must be a real `outline` so high-contrast can widen it.
 - **Don't** hard-code z-indexes; use `--z-popover`, `--z-overlay`, `--z-tooltip`.
+- **Don't** let a control change size when it opens or when its choice changes. A dropdown trigger keeps its closed box while its list is open, and a bolder selected label reserves its width in every state, as TopBar tabs and SegmentedControl labels do. `tests/browser/dropdown-layout-stability.spec.ts` checks this; add every new popover or choice control to it.

@@ -5,9 +5,12 @@ import { gotoPage } from "./helpers.js";
 // (clear row, custom values, meta search, veto/error, header snippet,
 // loading row, forced placement) and the t662 grouped-option tree.
 
-async function mountNestedRepositoryTypeahead(page: Page): Promise<void> {
+async function mountNestedRepositoryTypeahead(
+  page: Page,
+  overrides: { highlightFirstOption?: boolean } = {},
+): Promise<void> {
   await gotoPage(page, "typeahead");
-  await page.evaluate(async () => {
+  await page.evaluate(async (overrides) => {
     const [{ mount }, { default: Typeahead }] = await Promise.all([
       import("/node_modules/.vite/deps/svelte.js"),
       import("/src/lib/components/Typeahead.svelte"),
@@ -40,9 +43,10 @@ async function mountNestedRepositoryTypeahead(page: Page): Promise<void> {
         onselect: (value: string) => {
           target.dataset.value = value;
         },
+        ...overrides,
       },
     });
-  });
+  }, overrides);
 }
 
 // If the component's preferred desktop width becomes a hard minimum again,
@@ -102,6 +106,70 @@ test("shrinks to a narrow container without widening the document", async ({ pag
   expect(narrowLayout.typeaheadWidth).toBeLessThanOrEqual(narrowLayout.containerWidth);
   expect(narrowLayout.triggerWidth).toBeLessThanOrEqual(narrowLayout.containerWidth);
   expect(narrowLayout.documentWidth).toBeLessThanOrEqual(narrowLayout.layoutRight);
+});
+
+test("typing on the focused trigger opens search and keeps every character", async ({ page }) => {
+  await gotoPage(page, "typeahead");
+  const trigger = page.getByRole("button", { name: "Filter repositories…" });
+  await trigger.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  await expect(trigger).toBeFocused();
+  await page.keyboard.type("Agents");
+
+  const input = page.getByRole("combobox", { name: "Filter repositories…" });
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("Agents");
+  await expect(page.getByRole("option", { name: "kenn-io/agentsview" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "kenn-io/forge" })).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-demo="repo-value"]')).toHaveText("kenn-io/agentsview");
+  await expect(trigger).toBeFocused();
+});
+
+test("typing to open reports the initial query to remote consumers", async ({ page }) => {
+  await gotoPage(page, "typeahead");
+  const trigger = page.getByRole("button", { name: "Search remote options…" });
+  await trigger.focus();
+  await page.keyboard.type("z");
+  await expect(page.getByRole("combobox", { name: "Search remote options…" })).toHaveValue("z");
+  await expect(page.locator('[data-demo="remote-query"]')).toHaveText("z");
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await expect(page.locator('[data-demo="remote-query"]')).toHaveText("(empty)");
+});
+
+test("typing one character can select a custom value alongside matching options", async ({
+  page,
+}) => {
+  await gotoPage(page, "typeahead");
+  await page.getByRole("button", { name: "owner: Anyone" }).focus();
+  await page.keyboard.type("p");
+  await expect(page.getByRole("option", { name: 'Use "p"' })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-demo="owner-value"]')).toHaveText("p");
+});
+
+for (const key of ["Enter", "Space", "ArrowDown", "ArrowUp"]) {
+  test(`${key} opens the focused trigger with an empty search`, async ({ page }) => {
+    await gotoPage(page, "typeahead");
+    await page.getByRole("button", { name: "Filter repositories…" }).focus();
+    await page.keyboard.press(key);
+    const input = page.getByRole("combobox", { name: "Filter repositories…" });
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue("");
+  });
+}
+
+test("shortcut chords leave the focused trigger closed", async ({ page }) => {
+  await gotoPage(page, "typeahead");
+  const trigger = page.getByRole("button", { name: "Filter repositories…" });
+  await trigger.focus();
+  for (const key of ["Control+a", "Meta+a", "Alt+a"]) {
+    await page.keyboard.press(key);
+    await expect(trigger).toBeFocused();
+    await expect(page.getByRole("combobox", { name: "Filter repositories…" })).toHaveCount(0);
+  }
 });
 
 test("filters, highlights matches, and selects", async ({ page }) => {
@@ -173,13 +241,19 @@ test("remote results move Enter past the clear row after an empty loading state"
 test("remote results move Enter past the clear row when they arrive after opening", async ({
   page,
 }) => {
+  await page.clock.install({ time: new Date("2026-01-15T08:00:00Z") });
   await gotoPage(page, "typeahead");
+  await page.clock.pauseAt(new Date("2026-01-15T09:00:00Z"));
   const trigger = page.getByRole("button", { name: "Search remote options…" });
   await trigger.click();
   await page.getByRole("combobox", { name: "Search remote options…" }).fill("async-open");
   await page.keyboard.press("Escape");
 
+  // A duplicate close can start the response timer before the picker reopens.
+  await expect(trigger).toBeFocused();
+  await page.clock.runFor(200);
   await trigger.click();
+  await page.clock.runFor(100);
   await expect(page.getByRole("option", { name: "New result" })).toBeVisible();
   await page.keyboard.press("Enter");
 
@@ -323,6 +397,76 @@ test("Enter honors a deliberately highlighted clear row while filtering", async 
   await expect(page.locator('[data-demo="owner-value"]')).toHaveText("(none)");
 });
 
+test("multiple choices keep the list open and mark each chosen row", async ({ page }) => {
+  await gotoPage(page, "typeahead");
+  const trigger = page.getByRole("button", { name: "Filter labels…: bug" });
+  await trigger.click();
+
+  const input = page.getByRole("combobox", { name: "Filter labels…" });
+  const list = page.getByRole("listbox", { name: "Filter labels…" });
+  await expect(list).toHaveAttribute("aria-multiselectable", "true");
+  const chosenRows = list.locator('[role="option"][aria-selected="true"]');
+  const chosen = chosenRows.locator(".kit-typeahead__option-label");
+  await expect(chosen).toHaveText(["bug"]);
+
+  // Enter chooses the highlighted match; the list and the query stay.
+  await input.fill("perf");
+  await page.keyboard.press("Enter");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("perf");
+  await expect(page.locator('[data-demo="labels-value"]')).toHaveText("bug, performance");
+
+  await input.fill("");
+  await expect(chosen).toHaveText(["bug", "performance"]);
+  await expect(list.locator(".kit-typeahead__check svg")).toHaveCount(2);
+
+  // Choosing a chosen row removes it, by mouse too.
+  await list.getByRole("option", { name: /^bug/ }).click();
+  await expect(page.locator('[data-demo="labels-value"]')).toHaveText("performance");
+  await expect(chosen).toHaveText(["performance"]);
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Filter labels…: performance" })).toBeFocused();
+});
+
+test("the clear row chooses none in multiple mode", async ({ page }) => {
+  await gotoPage(page, "typeahead");
+  await page.getByRole("button", { name: "Filter labels…: bug" }).click();
+  const list = page.getByRole("listbox", { name: "Filter labels…" });
+  await list.getByRole("option", { name: /^docs/ }).click();
+  await page.keyboard.press("Escape");
+
+  const trigger = page.getByRole("button", { name: "Filter labels…: 2 selected" });
+  await trigger.click();
+  await list.getByRole("option", { name: "Any label" }).click();
+  await expect(page.locator('[data-demo="labels-value"]')).toHaveText("(none)");
+  await expect(list.getByRole("option", { name: "Any label" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+});
+
+test("remote multiple choices keep the remaining label after its row is gone", async ({ page }) => {
+  await gotoPage(page, "typeahead");
+  await page.evaluate(async () => {
+    const { mount } = await import("/node_modules/.vite/deps/svelte.js");
+    const { default: Fixture } =
+      await import("/tests/browser/fixtures/RemoteMultipleTypeahead.svelte");
+    document.body.replaceChildren();
+    mount(Fixture, { target: document.body });
+  });
+  await page.getByRole("button", { name: "Remote labels: 2 selected" }).click();
+  await expect(page.getByRole("option", { name: "Alpha" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Remote labels" }).fill("be");
+  await page.getByRole("option", { name: "Beta" }).click();
+  await expect(page.locator('[data-fixture="remote-values"]')).toHaveText("alpha");
+  await page.keyboard.press("Escape");
+
+  // Alpha's row left the list when the query narrowed to Beta, and the
+  // closed source lists nothing, yet the trigger still names it.
+  await expect(page.getByRole("button", { name: "Remote labels: Alpha" })).toBeVisible();
+});
+
 test("a vetoed selection keeps the list open and shows the error row", async ({ page }) => {
   await gotoPage(page, "typeahead");
   await page.getByRole("button", { name: "Filter branches…" }).click();
@@ -341,6 +485,46 @@ test("a vetoed selection keeps the list open and shows the error row", async ({ 
   await release.click();
   await expect(page.locator('[data-demo="branch-value"]')).toHaveText("release");
   await expect(page.locator(".kit-typeahead__status--error")).toHaveCount(0);
+});
+
+// The error sits outside the listbox, so it must share the options' scroll
+// area: a long message on a short window would otherwise push the panel past
+// its height cap and squeeze the options out of reach.
+test("a long error scrolls with the options inside the panel's height", async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 360 });
+  await gotoPage(page, "typeahead");
+  await page.evaluate(async () => {
+    const [{ mount }, { default: Typeahead }] = await Promise.all([
+      import("/node_modules/.vite/deps/svelte.js"),
+      import("/src/lib/components/Typeahead.svelte"),
+    ]);
+    document.body.replaceChildren();
+    const target = document.createElement("div");
+    document.body.append(target);
+    mount(Typeahead, {
+      target,
+      props: {
+        options: Array.from({ length: 12 }, (_, i) => ({ name: `opt-${i}`, label: `Option ${i}` })),
+        value: "",
+        fallbackLabel: "None",
+        placeholder: "Pick one…",
+        error: "Could not save this choice. ".repeat(30),
+        onselect: (value: string) => {
+          target.dataset.value = value;
+        },
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Pick one…" }).click();
+
+  const panel = page.locator(".kit-typeahead__panel");
+  const panelBox = (await panel.boundingBox())!;
+  expect(panelBox.height).toBeLessThanOrEqual(360 / 2 + 1);
+
+  const last = page.getByRole("option", { name: "Option 11" });
+  await last.scrollIntoViewIfNeeded();
+  await last.click();
+  await expect(page.locator("body > div")).toHaveAttribute("data-value", "opt-11");
 });
 
 test("tabbing out of a focusable header control dismisses the panel", async ({ page }) => {
@@ -492,17 +676,129 @@ test("nested repository groups expose deep levels and parent navigation", async 
 });
 
 test("filtering nested repository groups keeps ancestry and selects the leaf", async ({ page }) => {
-  await mountNestedRepositoryTypeahead(page);
-  const fixture = page.locator("#nested-typeahead-fixture");
-  await fixture.getByRole("button", { name: "Filter nested repositories…" }).click();
-  const input = fixture.getByRole("combobox", { name: "Filter nested repositories…" });
-  await input.fill("agentsview");
-  const rows = fixture.locator(".kit-typeahead__option");
-  await expect(rows).toHaveCount(3);
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
-  await expect(fixture).toHaveAttribute("data-value", "github.com/kenn-io/agentsview");
+  for (const highlightFirstOption of [false, true]) {
+    await page.goto("about:blank");
+    await mountNestedRepositoryTypeahead(page, { highlightFirstOption });
+    const fixture = page.locator("#nested-typeahead-fixture");
+    await fixture.getByRole("button", { name: "Filter nested repositories…" }).click();
+    const input = fixture.getByRole("combobox", { name: "Filter nested repositories…" });
+    if (highlightFirstOption) {
+      await expect(fixture.getByRole("treeitem", { name: "Forge", exact: true })).toHaveClass(
+        /highlighted/,
+      );
+    }
+    await input.fill("a");
+    const rows = fixture.locator(".kit-typeahead__option");
+    await expect(rows).toHaveCount(3);
+    if (!highlightFirstOption) {
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
+    }
+    await expect(fixture.getByRole("treeitem", { name: "agentsview", exact: true })).toHaveClass(
+      /highlighted/,
+    );
+    await page.keyboard.press("Enter");
+    await expect(fixture).toHaveAttribute("data-value", "github.com/kenn-io/agentsview");
+  }
+});
+
+for (const { remote, expanded, query, selected } of [
+  { remote: false, expanded: true, query: "", selected: "alpha" },
+  { remote: true, expanded: true, query: "alpha", selected: "alpha" },
+  { remote: true, expanded: false, query: "unmatched", selected: "unmatched" },
+]) {
+  test(`grouped ${remote ? "remote" : "local"} ${expanded ? "expanded" : "collapsed"} options arriving after opening start on the first choice`, async ({
+    page,
+  }) => {
+    await gotoPage(page, "typeahead");
+    const fixture = await page.evaluateHandle(async (remote) => {
+      const [{ mountReactive }, { default: Typeahead }] = await Promise.all([
+        import("/tests/browser/fixtures/mount-reactive.svelte.ts"),
+        import("/src/lib/components/Typeahead.svelte"),
+      ]);
+      document.body.replaceChildren();
+      return mountReactive(Typeahead, document.body, {
+        options: [],
+        loading: true,
+        remote,
+        highlightFirstOption: true,
+        allowCustom: true,
+        allowClear: true,
+        fallbackLabel: "Choose an option",
+        placeholder: "Grouped choices",
+        onselect: (name: string) => {
+          document.body.dataset.value = name;
+        },
+      });
+    }, remote);
+    await page.getByRole("button", { name: "Grouped choices" }).click();
+    const input = page.getByRole("combobox", { name: "Grouped choices" });
+    await expect(page.getByText("Loading…", { exact: true })).toBeVisible();
+    if (query) await input.fill(query);
+    await fixture.evaluate(
+      (component, expanded) =>
+        component.update({
+          options: [
+            {
+              name: "group",
+              label: "Group",
+              expanded,
+              children: [{ name: "alpha", label: "Alpha" }],
+            },
+          ],
+          loading: false,
+        }),
+      expanded,
+    );
+    await expect(
+      page.getByRole("treeitem", { name: expanded ? "Alpha" : 'Use "unmatched"', exact: true }),
+    ).toBeVisible();
+    await input.press("Enter");
+    await expect(page.locator("body")).toHaveAttribute("data-value", selected);
+  });
+}
+
+test("the panel aligns with a wider anchor and follows its resize", async ({ page }) => {
+  await gotoPage(page, "typeahead");
+  await page.evaluate(async () => {
+    const [{ mount }, { default: Typeahead }] = await Promise.all([
+      import("/node_modules/.vite/deps/svelte.js"),
+      import("/src/lib/components/Typeahead.svelte"),
+    ]);
+    document.body.replaceChildren();
+    const anchor = document.createElement("div");
+    anchor.id = "panel-anchor-fixture";
+    anchor.style.cssText =
+      "position: fixed; left: 40px; top: 40px; width: 480px; height: 80px; display: flex; justify-content: flex-end; align-items: flex-start;";
+    document.body.append(anchor);
+    mount(Typeahead, {
+      target: anchor,
+      props: {
+        options: [{ name: "forge", label: "Forge" }],
+        fallbackLabel: "All repositories",
+        placeholder: "Filter anchored repositories…",
+        panelAnchor: anchor,
+        onselect: () => undefined,
+      },
+    });
+  });
+  const anchor = page.locator("#panel-anchor-fixture");
+  const trigger = anchor.getByRole("button");
+  const triggerBox = (await trigger.boundingBox())!;
+  const anchorBox = (await anchor.boundingBox())!;
+  expect(triggerBox.x).toBeGreaterThan(anchorBox.x);
+  await trigger.click();
+  const panel = page.locator(".kit-typeahead__panel");
+  await expect(panel).toBeVisible();
+  const panelBox = (await panel.boundingBox())!;
+  expect(Math.abs(panelBox.x - anchorBox.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(panelBox.width - anchorBox.width)).toBeLessThanOrEqual(1);
+  expect(panelBox.y).toBeCloseTo(triggerBox.y + triggerBox.height + 2, 0);
+  await anchor.evaluate((element) => {
+    element.style.width = "600px";
+  });
+  await expect.poll(async () => (await panel.boundingBox())!.width).toBeCloseTo(600, 0);
+  expect(Math.abs((await panel.boundingBox())!.x - anchorBox.x)).toBeLessThanOrEqual(1);
 });
 
 test("header snippet drives the option source through the loading row", async ({ page }) => {
@@ -654,4 +950,171 @@ test("optional icons follow options and the selected value through search", asyn
       .getByRole("button", { name: "Search agents: Codex" })
       .locator(".kit-harness-icon--openai"),
   ).toBeVisible();
+});
+
+// The "Open from a button the app renders" demo hands the attachment to an IconButton.
+test.describe("trigger button the app renders", () => {
+  // The compact-trigger demo's built-in button shares this name.
+  const appTrigger = (page: Page, name = "Time zone: Server time") =>
+    page.locator(".kit-typeahead--custom-trigger").getByRole("button", { name, exact: true });
+
+  test("opens the search in a popover beside the button and selects", async ({ page }) => {
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await expect(button).toHaveAttribute("aria-haspopup", "listbox");
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    await button.click();
+
+    await expect(button).toBeVisible();
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    const input = page.getByRole("combobox", { name: "Time zone" });
+    await expect(input).toBeFocused();
+    await expect(page.locator(".kit-typeahead__panel .kit-typeahead__input")).toHaveCount(1);
+    await expect(button).toHaveAttribute(
+      "aria-controls",
+      (await input.getAttribute("aria-controls"))!,
+    );
+
+    await input.fill("tok");
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[data-demo="icon-zone-value"]')).toHaveText("Asia/Tokyo");
+    const chosen = appTrigger(page, "Time zone: Asia/Tokyo");
+    await expect(chosen).toBeFocused();
+    await expect(chosen).toHaveAttribute("aria-expanded", "false");
+    await expect(chosen).not.toHaveAttribute("aria-controls");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+  });
+
+  test("Escape closes the list and returns focus to the button", async ({ page }) => {
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await button.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("combobox", { name: "Time zone" })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(button).toBeFocused();
+    await expect(page.locator('[data-demo="icon-zone-value"]')).toHaveText("(server time)");
+  });
+
+  test("typing on the focused button opens search with that character", async ({ page }) => {
+    await gotoPage(page, "typeahead");
+    await appTrigger(page).focus();
+    await page.keyboard.press("b");
+    const input = page.getByRole("combobox", { name: "Time zone" });
+    await expect(input).toHaveValue("b");
+    await expect(page.getByRole("option", { name: /Europe\/Berlin/ })).toBeVisible();
+  });
+
+  test("clicking the button again closes the list", async ({ page }) => {
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await button.click();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await button.click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("the popover stays inside the window from a corner button", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 480 });
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await page.locator(".kit-typeahead--custom-trigger").evaluate((el) => {
+      (el as HTMLElement).style.cssText = "position: fixed; right: 4px; bottom: 4px;";
+    });
+    await button.click();
+    const panel = page.locator(".kit-typeahead__panel");
+    await expect(panel).toBeVisible();
+    const box = (await panel.boundingBox())!;
+    const trigger = (await button.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+    expect(box.y + box.height).toBeLessThanOrEqual(trigger.y);
+  });
+
+  test("Escape on the button after Shift+Tab closes only the list", async ({ page }) => {
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await button.click();
+    await page.keyboard.press("Shift+Tab");
+    await expect(button).toBeFocused();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    // Stands in for an enclosing dialog that closes on Escape.
+    await page.evaluate(() => {
+      (window as Window & { escapes?: number }).escapes = 0;
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") (window as Window & { escapes?: number }).escapes! += 1;
+      });
+    });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(button).toBeFocused();
+    expect(await page.evaluate(() => (window as Window & { escapes?: number }).escapes)).toBe(0);
+  });
+
+  test("a button marked aria-disabled does not open the list", async ({ page }) => {
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await button.evaluate((el) => el.setAttribute("aria-disabled", "true"));
+    await button.click({ force: true });
+    await button.focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("b");
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("a click closes the list in browsers that do not focus a pressed button", async ({
+    page,
+  }) => {
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await button.click();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    // Safari and Firefox on macOS leave focus on nothing when a button is
+    // pressed. Reproduce that default action unless the page prevented it.
+    await page.evaluate(() => {
+      window.addEventListener("mousedown", (event) => {
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        (document.activeElement as HTMLElement | null)?.blur();
+      });
+    });
+    await button.click();
+    await expect(page.getByRole("listbox")).toHaveCount(0);
+    await expect(button).toBeFocused();
+  });
+
+  test("the list fits a narrow window inside a CSS-zoomed area", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 480 });
+    await gotoPage(page, "typeahead");
+    const picker = page.locator(".kit-typeahead--custom-trigger");
+    await picker.evaluate((el) => {
+      (el as HTMLElement).style.cssText = "position: fixed; left: 4px; top: 4px; zoom: 2;";
+    });
+    await appTrigger(page).click();
+    const box = (await page.locator(".kit-typeahead__panel").boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+  });
+
+  test("a trigger wider than the window keeps the list on screen", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 480 });
+    await gotoPage(page, "typeahead");
+    const button = appTrigger(page);
+    await page.locator(".kit-typeahead--custom-trigger").evaluate((el) => {
+      (el as HTMLElement).style.cssText = "position: fixed; left: 0; top: 4px;";
+    });
+    await button.evaluate((el) => {
+      el.style.width = "500px";
+    });
+    await button.click({ position: { x: 20, y: 10 } });
+    const box = (await page.locator(".kit-typeahead__panel").boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360);
+  });
 });

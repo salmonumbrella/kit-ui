@@ -13,8 +13,8 @@ const html = String.raw`<!doctype html>
 
       :root {
         --ink: #181b24;
-        --text-secondary: #555b6e;
-        --text-muted: #878ea0;
+        --text-secondary: #474d5f;
+        --text-muted: #62687c;
         --blue: #2563eb;
         --blue-soft: #eff6ff;
         --line: #d8dae2;
@@ -187,7 +187,7 @@ bun run dev</pre>
       </p>
 
       <h2>Production preview</h2>
-      <pre>bun run build
+      <pre>bun run build:demo
 bun run preview</pre>
 
       <p class="closing">Before sharing a change, check the relevant components in light mode, dark mode, and Mobile preview.</p>

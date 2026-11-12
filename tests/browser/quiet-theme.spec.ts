@@ -1,15 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { contrastOf, gotoPage, setTheme } from "./helpers.js";
+import { contrastOf, gotoPage, resolvedStyle, setTheme, useTheme } from "./helpers.js";
 
 // The quiet theme drops uppercase label styling through the
 // --label-transform token; the default Workbench pair must keep it.
-
-async function useTheme(page: Page, name: string | null): Promise<void> {
-  await page.evaluate((themeName) => {
-    if (themeName) document.documentElement.dataset.kitTheme = themeName;
-    else delete document.documentElement.dataset.kitTheme;
-  }, name);
-}
 
 /** The computed background as rounded 0–255 sRGB channels, whether the
  * browser serializes it as rgb() or as color(srgb …) from color-mix(). */
@@ -64,18 +57,25 @@ test("quiet theme renders chip and eyebrow labels in sentence case", async ({ pa
 });
 
 for (const dark of [false, true]) {
-  test(`quiet muted text clears AA on both surfaces (${dark ? "dark" : "light"})`, async ({
+  test(`quiet muted text clears AA on every surface (${dark ? "dark" : "light"})`, async ({
     page,
   }) => {
     await gotoPage(page, "chip");
     await useTheme(page, "quiet");
     await setTheme(page, { dark });
-    for (const surface of ["--bg-surface", "--bg-primary"]) {
+    // The last entry is the fill of a raised control.
+    for (const surface of [
+      "var(--bg-inset)",
+      "var(--bg-primary)",
+      "var(--bg-surface)",
+      "var(--bg-surface-hover)",
+      "var(--bg-raised, var(--bg-inset))",
+    ]) {
       const probe = await page.evaluate((background) => {
         document.querySelector("[data-quiet-muted-probe]")?.remove();
         const host = document.createElement("div");
         host.dataset.quietMutedProbe = "";
-        host.style.background = `var(${background})`;
+        host.style.background = background;
         host.style.position = "fixed";
         host.style.inset = "0 auto auto 0";
         const text = document.createElement("span");
@@ -114,5 +114,31 @@ for (const dark of [false, true]) {
     }
     const bug = page.locator(".kit-color-label", { hasText: /^bug$/ }).first();
     expect(await backgroundChannels(bug)).not.toEqual([215, 58, 74]);
+  });
+}
+
+/** WCAG relative luminance of a background token under the current theme. */
+async function surfaceLuminance(page: Page, token: string): Promise<number> {
+  const color = await resolvedStyle(page, "background-color", `var(${token})`);
+  const [r = 0, g = 0, b = 0] = (color.match(/[\d.]+/g) ?? []).map(Number);
+  const linear = (channel: number) => {
+    const s = channel / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+}
+
+for (const dark of [false, true]) {
+  test(`quiet layers inset below page below surface (${dark ? "dark" : "light"})`, async ({
+    page,
+  }) => {
+    await gotoPage(page, "chip");
+    await useTheme(page, "quiet");
+    await setTheme(page, { dark });
+    const inset = await surfaceLuminance(page, "--bg-inset");
+    const primary = await surfaceLuminance(page, "--bg-primary");
+    const surface = await surfaceLuminance(page, "--bg-surface");
+    expect(inset).toBeLessThan(primary);
+    expect(primary).toBeLessThan(surface);
   });
 }

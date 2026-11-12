@@ -1,62 +1,76 @@
 <script lang="ts">
-  import { Chip, Table, TableHeaderCell, type SortDirection } from "../../lib/index.js";
+  import { Chip, Table, TableHeaderCell, TableSort } from "../../lib/index.js";
   import DemoSection from "../DemoSection.svelte";
 
   interface Job {
     id: number;
     repo: string;
-    status: "done" | "running" | "failed";
+    status: "done" | "running" | "queued" | "failed";
     elapsed: number;
-    cost: number;
+    cost: number | null;
   }
 
   const jobs: Job[] = [
     { id: 412, repo: "kenn-io/forge", status: "done", elapsed: 312, cost: 1.42 },
-    { id: 413, repo: "kenn-io/agentsview", status: "running", elapsed: 128, cost: 0.61 },
-    { id: 414, repo: "kenn-io/kit-ui", status: "done", elapsed: 87, cost: 0.22 },
+    { id: 413, repo: "kenn-io/agentsview", status: "queued", elapsed: 0, cost: null },
+    { id: 414, repo: "kenn-io/kit-ui", status: "running", elapsed: 87, cost: 0.22 },
     { id: 415, repo: "kenn-io/forge", status: "failed", elapsed: 45, cost: 0.19 },
     { id: 416, repo: "kenn-io/infra", status: "done", elapsed: 561, cost: 2.08 },
   ];
 
-  let sortKey = $state<keyof Job>("id");
-  let sortDirection = $state<SortDirection>("asc");
-
-  function sortBy(key: keyof Job) {
-    if (sortKey === key) {
-      sortDirection = sortDirection === "asc" ? "desc" : "asc";
-    } else {
-      sortKey = key;
-      sortDirection = "asc";
-    }
-  }
-
-  const sorted = $derived(
-    [...jobs].sort((a, b) => {
-      const av = a[sortKey];
-      const bv = b[sortKey];
-      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-      return sortDirection === "asc" ? cmp : -cmp;
-    }),
+  const sorter = new TableSort<Job>(
+    {
+      id: (job) => job.id,
+      repo: (job) => job.repo,
+      status: (job) => job.status,
+      elapsed: { value: (job) => job.elapsed, firstDirection: "desc" },
+      cost: { value: (job) => job.cost, firstDirection: "desc" },
+    },
+    { key: "id" },
   );
 
-  function direction(key: keyof Job): SortDirection | null {
-    return sortKey === key ? sortDirection : null;
-  }
-
-  const statusTone = { done: "success", running: "info", failed: "danger" } as const;
+  const statusTone = {
+    done: "success",
+    running: "info",
+    queued: "neutral",
+    failed: "danger",
+  } as const;
+  const totals = [
+    { status: "done", count: 3 },
+    { status: "running", count: 1 },
+    { status: "failed", count: 1 },
+  ] as const;
+  const regions = [
+    {
+      name: "Europe",
+      hosts: [
+        { name: "Frankfurt", load: 42 },
+        { name: "Dublin", load: 17 },
+      ],
+    },
+    { name: "Americas", hosts: [{ name: "Ohio", load: 63 }] },
+  ];
 </script>
 
 <DemoSection
   title="Sortable table"
-  description="Table provides the shell (sticky header, zebra striping, hover); TableHeaderCell provides sortable header cells with aria-sort. Sorting itself stays in your code — the header only reports clicks."
-  code={`<Table ariaLabel="Review jobs">
+  description="Table provides the shell (sticky header, zebra striping, hover); TableHeaderCell provides header cells with aria-sort. TableSort holds the sort state: declare each column's value once, pass it to every header, and render sorter.sort(rows). Rows without a value sort last."
+  code={`const sorter = new TableSort<Job>(
+  {
+    id: (job) => job.id,
+    repo: (job) => job.repo,
+    cost: { value: (job) => job.cost, firstDirection: "desc" },
+  },
+  { key: "id" },
+);
+
+<Table ariaLabel="Review jobs">
   {#snippet header()}
-    <TableHeaderCell label="ID" sortable sortDirection={direction("id")} onsort={() => sortBy("id")} />
-    <TableHeaderCell label="Repo" sortable sortDirection={direction("repo")} onsort={() => sortBy("repo")} />
-    <TableHeaderCell label="Status" />
-    <TableHeaderCell label="Cost" numeric sortable sortDirection={direction("cost")} onsort={() => sortBy("cost")} />
+    <TableHeaderCell label="ID" sort={sorter} column="id" />
+    <TableHeaderCell label="Repo" sort={sorter} column="repo" />
+    <TableHeaderCell label="Cost" numeric sort={sorter} column="cost" />
   {/snippet}
-  {#each sorted as job (job.id)}
+  {#each sorter.sort(jobs) as job (job.id)}
     <tr>…</tr>
   {/each}
 </Table>`}
@@ -64,42 +78,93 @@
   <div class="table-host">
     <Table ariaLabel="Review jobs">
       {#snippet header()}
-        <TableHeaderCell
-          label="ID"
-          sortable
-          sortDirection={direction("id")}
-          onsort={() => sortBy("id")}
-        />
-        <TableHeaderCell
-          label="Repo"
-          sortable
-          sortDirection={direction("repo")}
-          onsort={() => sortBy("repo")}
-        />
-        <TableHeaderCell label="Status" />
-        <TableHeaderCell
-          label="Elapsed"
-          numeric
-          sortable
-          sortDirection={direction("elapsed")}
-          onsort={() => sortBy("elapsed")}
-        />
-        <TableHeaderCell
-          label="Cost"
-          numeric
-          sortable
-          sortDirection={direction("cost")}
-          onsort={() => sortBy("cost")}
-        />
+        <TableHeaderCell label="ID" sort={sorter} column="id" />
+        <TableHeaderCell label="Repo" sort={sorter} column="repo" />
+        <TableHeaderCell label="Status" sort={sorter} column="status" />
+        <TableHeaderCell label="Elapsed" numeric sort={sorter} column="elapsed" />
+        <TableHeaderCell label="Cost" numeric sort={sorter} column="cost" />
       {/snippet}
-      {#each sorted as job (job.id)}
+      {#each sorter.sort(jobs) as job (job.id)}
         <tr>
           <td>#{job.id}</td>
           <td>{job.repo}</td>
           <td><Chip tone={statusTone[job.status]} size="sm">{job.status}</Chip></td>
           <td class="num">{job.elapsed}s</td>
-          <td class="num">${job.cost.toFixed(2)}</td>
+          <td class="num">{job.cost === null ? "—" : `$${job.cost.toFixed(2)}`}</td>
         </tr>
+      {/each}
+    </Table>
+  </div>
+</DemoSection>
+
+<DemoSection
+  title="Opting out of sorting"
+  description="Every table sorts unless it opts out with unsorted, such as a short fixed list with one row per status. kit-ui-check's unsorted-table-header rule accepts unsorted headers only there."
+  code={`<Table ariaLabel="Jobs by status" unsorted>
+  {#snippet header()}
+    <TableHeaderCell label="Status" />
+    <TableHeaderCell label="Jobs" numeric />
+  {/snippet}
+  …
+</Table>`}
+>
+  <div class="table-host">
+    <Table ariaLabel="Jobs by status" unsorted>
+      {#snippet header()}
+        <TableHeaderCell label="Status" />
+        <TableHeaderCell label="Jobs" numeric />
+      {/snippet}
+      {#each totals as total (total.status)}
+        <tr>
+          <td>{total.status}</td>
+          <td class="num">{total.count}</td>
+        </tr>
+      {/each}
+    </Table>
+  </div>
+</DemoSection>
+
+<DemoSection
+  title="Bare table"
+  description="With bare, Table renders only the table element, carrying class and ariaLabel, so its content can hold row groups, a colgroup or spanning header rows. kit-ui's table styles do not apply: style the table from an element the page owns. unsorted works as on any Table."
+  code={`<Table unsorted bare ariaLabel="Hosts by region">
+  <thead>
+    <tr>
+      <th scope="col">Host</th>
+      <th scope="col" class="num">Load</th>
+    </tr>
+  </thead>
+  {#each regions as region (region.name)}
+    <tbody>
+      <tr><th scope="rowgroup" colspan="2">{region.name}</th></tr>
+      {#each region.hosts as host (host.name)}
+        <tr>
+          <th scope="row">{host.name}</th>
+          <td class="num">{host.load}%</td>
+        </tr>
+      {/each}
+    </tbody>
+  {/each}
+</Table>`}
+>
+  <div class="bare-host">
+    <Table unsorted bare ariaLabel="Hosts by region" class="regions">
+      <thead>
+        <tr>
+          <th scope="col">Host</th>
+          <th scope="col" class="num">Load</th>
+        </tr>
+      </thead>
+      {#each regions as region (region.name)}
+        <tbody>
+          <tr><th scope="rowgroup" colspan="2">{region.name}</th></tr>
+          {#each region.hosts as host (host.name)}
+            <tr>
+              <th scope="row">{host.name}</th>
+              <td class="num">{host.load}%</td>
+            </tr>
+          {/each}
+        </tbody>
       {/each}
     </Table>
   </div>
@@ -118,5 +183,33 @@
   .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+
+  .bare-host {
+    width: 100%;
+    overflow: auto;
+    border: var(--border-width) solid var(--border-muted);
+    border-radius: var(--radius-md);
+  }
+
+  .bare-host :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--font-size-sm);
+  }
+
+  .bare-host th,
+  .bare-host td {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: var(--border-width) solid var(--border-muted);
+  }
+
+  .bare-host th:not(.num) {
+    text-align: left;
+  }
+
+  .bare-host th[scope="rowgroup"] {
+    background: var(--bg-inset);
+    color: var(--text-secondary);
   }
 </style>

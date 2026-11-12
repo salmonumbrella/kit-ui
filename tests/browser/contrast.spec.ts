@@ -59,8 +59,7 @@ function keyOf(className: string): string {
 // every theme. Any other entry appearing here is a regression.
 const KNOWN_FAILURES: Record<string, Record<string, number>> = {
   light: {
-    "kit-chip--tone-muted": 2.09,
-    "kit-chip--tone-canceled": 2.83,
+    "kit-chip--tone-muted": 2.97,
   },
   "light-hc": {
     "kit-chip--tone-muted": 4.1,
@@ -74,7 +73,7 @@ const KNOWN_FAILURES: Record<string, Record<string, number>> = {
     "kit-chip--tone-canceled": 4.25,
   },
   "quiet-dark": {
-    "kit-chip--tone-muted": 3.51,
+    "kit-chip--tone-muted": 3.99,
     "kit-chip--tone-canceled": 4.4,
   },
 };
@@ -166,5 +165,38 @@ for (const mode of MODES) {
     expect(stale, "stale KNOWN_FAILURES entries — these tones now pass AA; remove them").toEqual(
       [],
     );
+  });
+}
+
+for (const mode of MODES) {
+  test(`search by meaning hint contrast · ${mode.name}`, async ({ page }) => {
+    await gotoPage(page, "search-by-meaning");
+    await applyMode(page, mode);
+    expect(
+      await contrastOf(page.locator(".kit-search-by-meaning-hint button")),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+}
+
+// Muted ink carries placeholders, metadata, and secondary labels, so it is
+// text and needs 4.5:1 on every neutral fill it sits on. quiet-theme.spec.ts
+// covers the quiet theme.
+for (const mode of MODES.filter((m) => !("theme" in m))) {
+  test(`muted ink reaches AA on the neutral fills · ${mode.name}`, async ({ page }) => {
+    await gotoPage(page, "theme");
+    await applyMode(page, mode);
+    for (const fill of ["--bg-surface", "--bg-primary", "--bg-inset", "--bg-surface-hover"]) {
+      const probe = page.locator("[data-test-muted-probe]");
+      await page.evaluate((background) => {
+        document.querySelector("[data-test-muted-probe]")?.remove();
+        const el = document.createElement("span");
+        el.dataset.testMutedProbe = "";
+        el.textContent = "muted";
+        el.style.color = "var(--text-muted)";
+        el.style.background = `var(${background})`;
+        document.body.append(el);
+      }, fill);
+      expect(await contrastOf(probe), `--text-muted on ${fill}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 }

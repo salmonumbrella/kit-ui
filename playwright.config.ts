@@ -29,14 +29,24 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // CI keeps GitHub annotations and lists every test by name. It also
+  // writes a JSON report, uploaded as an artifact, where a test that failed
+  // and then passed on a retry is marked "flaky".
+  reporter: process.env.CI
+    ? [["list"], ["github"], ["json", { outputFile: "test-results/playwright/browser.json" }]]
+    : "list",
   use: {
     baseURL,
     viewport: { width: 1280, height: 800 },
+    // Keep the failing attempt, even when a later retry passes.
+    trace: process.env.CI ? "retain-on-failure" : "off",
   },
   webServer: {
     command: `vp run dev --port ${port} --strictPort`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
+    // A cold CI runner can spend over a minute pre-bundling dependencies
+    // before Vite answers; a healthy start returns as soon as it is up.
+    timeout: 180_000,
   },
 });

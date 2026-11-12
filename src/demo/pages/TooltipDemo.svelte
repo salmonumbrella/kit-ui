@@ -1,9 +1,17 @@
 <script lang="ts">
+  import AlignLeft from "@lucide/svelte/icons/text-align-start";
+  import Bell from "@lucide/svelte/icons/bell";
+  import Inbox from "@lucide/svelte/icons/inbox";
+  import AlignRight from "@lucide/svelte/icons/text-align-end";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Button from "../../lib/components/Button.svelte";
   import Chip from "../../lib/components/Chip.svelte";
   import DiffStats from "../../lib/components/DiffStats.svelte";
+  import IconButton from "../../lib/components/IconButton.svelte";
   import Tooltip from "../../lib/components/Tooltip.svelte";
   import DemoSection from "../DemoSection.svelte";
+
+  let notificationsShown = $state(true);
 
   const breakdown = [
     { label: "Plans/docs", additions: 210, deletions: 12 },
@@ -15,7 +23,7 @@
 
 <DemoSection
   title="Text tooltip"
-  description="Hover or focus the trigger; opens after a short delay, closes on leave/blur/Escape. Positioning is viewport-aware (flips above when there's no room below) with the arrow following."
+  description="Hover or focus the trigger; opens after a short delay, closes on leave/blur/Escape. The bubble centers on its trigger, flips above when there's no room below, shifts to stay on screen, and its arrow keeps pointing at the trigger."
   code={`<Tooltip text="Rebases and fast-forwards the branch">
   <Button size="sm" label="Update branch" />
 </Tooltip>`}
@@ -23,6 +31,23 @@
   <Tooltip text="Rebases and fast-forwards the branch">
     <Button size="sm" label="Update branch" />
   </Tooltip>
+  <span data-testid="icon-tooltip">
+    <Tooltip text="Reset to default">
+      <IconButton ariaLabel="Reset" title="" size="sm">
+        <RotateCcw size={14} aria-hidden="true" />
+      </IconButton>
+    </Tooltip>
+  </span>
+  <span data-testid="group-tooltip">
+    <Tooltip text="Aligns the selected text">
+      <IconButton ariaLabel="Align left" title="" size="sm">
+        <AlignLeft size={14} aria-hidden="true" />
+      </IconButton>
+      <IconButton ariaLabel="Align right" title="" size="sm">
+        <AlignRight size={14} aria-hidden="true" />
+      </IconButton>
+    </Tooltip>
+  </span>
   <Tooltip text="Uses tabindex so plain text is keyboard-reachable" focusable>
     <span style="text-decoration: underline dotted; color: var(--text-secondary)"
       >focusable text</span
@@ -68,6 +93,34 @@
 </DemoSection>
 
 <DemoSection
+  title="Beside a column of icons"
+  description="side=&quot;right&quot; puts the bubble beside the trigger, so it never covers the next icon down. Once one tooltip is open, moving to the next trigger swaps them at once, with no hover delay."
+  code={`<Tooltip text="Inbox" side="right">
+  <IconButton ariaLabel="Inbox" title=""><Inbox size={16} /></IconButton>
+</Tooltip>`}
+>
+  <div class="column" data-testid="icon-column">
+    <Tooltip text="Inbox" side="right">
+      <IconButton ariaLabel="Inbox" title="">
+        <Inbox size={16} aria-hidden="true" />
+      </IconButton>
+    </Tooltip>
+    {#if notificationsShown}
+      <Tooltip text="Notifications" side="right">
+        <IconButton ariaLabel="Notifications" title="">
+          <Bell size={16} aria-hidden="true" />
+        </IconButton>
+      </Tooltip>
+    {/if}
+  </div>
+  <Button
+    size="sm"
+    label={notificationsShown ? "Remove Notifications" : "Restore Notifications"}
+    onclick={() => (notificationsShown = !notificationsShown)}
+  />
+</DemoSection>
+
+<DemoSection
   title="Alignment and delays"
   code={`<Tooltip text="…" align="end" openDelayMs={0} closeDelayMs={0}>…</Tooltip>`}
 >
@@ -77,6 +130,12 @@
 </DemoSection>
 
 <style>
+  .column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
   .rows {
     display: flex;
     flex-direction: column;

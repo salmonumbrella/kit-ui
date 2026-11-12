@@ -1,11 +1,12 @@
 import { type Snippet } from "svelte";
+import { type RefreshReason } from "../utils/refresh.js";
 interface Props {
     /** Epoch ms of the last successful fetch, or null before the first load. */
     lastUpdatedAt: number | null;
     /** Spins the icon and disables the button while a refresh is in flight. */
     busy?: boolean;
-    /** Refetches the data; invoked on the interval and on click. */
-    onRefresh: () => void;
+    /** Refetches the data; identifies a button click or an automatic tick. */
+    onRefresh: (reason: RefreshReason) => void;
     /** Accessible name for the button (aria-label). */
     label?: string;
     /** Tooltip text; defaults to `label` when omitted. */
@@ -34,6 +35,10 @@ interface Props {
      * breakdown of the last fetch. Replaces the label's default timestamp
      * `title`, so include the timestamp in the snippet if it still matters. */
     ageTooltip?: Snippet | undefined;
+    /** `sm` sets a smaller, quiet glyph tight against the status text, so a
+     * page toolbar's refresh reads as part of its "Updated ..." label and
+     * not as a second copy of a top-bar Refresh button. */
+    size?: "sm" | "md";
 }
 declare const RefreshControl: import("svelte").Component<Props, {}, "">;
 type RefreshControl = ReturnType<typeof RefreshControl>;

@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import type { Attachment } from "svelte/attachments";
 
   interface Props {
     /** Accessible name — required, an icon carries no text of its own. */
@@ -25,6 +26,9 @@
     ariaHaspopup?: "menu" | "listbox" | "dialog" | "grid" | "tree" | boolean;
     /** id of the element this button controls (pairs with ariaExpanded). */
     ariaControls?: string;
+    /** The keyboard shortcut that also runs this action, in `aria-keyshortcuts`
+     * form such as `Meta+B`. */
+    ariaKeyshortcuts?: string;
     /** For toggle buttons — `true` renders the pressed (inset) look. */
     ariaPressed?: boolean;
     type?: "button" | "submit" | "reset";
@@ -32,6 +36,9 @@
     /** The icon (size 14 works well at both button sizes). */
     children: Snippet;
     class?: string;
+    /** `{@attach}` on IconButton reaches its button, so a MenuTrigger or
+     * Typeahead `attachment` can wire it as a popup trigger. */
+    [attachment: symbol]: Attachment<HTMLButtonElement>;
   }
 
   let {
@@ -44,15 +51,18 @@
     ariaExpanded = undefined,
     ariaHaspopup = undefined,
     ariaControls = undefined,
+    ariaKeyshortcuts = undefined,
     ariaPressed = undefined,
     type = "button",
     onclick = undefined,
     children,
     class: className = "",
+    ...attachments
   }: Props = $props();
 </script>
 
 <button
+  {...attachments}
   {type}
   class={[
     "kit-icon-button",
@@ -67,6 +77,7 @@
   aria-expanded={ariaExpanded}
   aria-haspopup={ariaHaspopup}
   aria-controls={ariaControls}
+  aria-keyshortcuts={ariaKeyshortcuts}
   aria-pressed={ariaPressed}
   aria-disabled={ariaDisabled || undefined}
   onclick={(event) => {
@@ -90,12 +101,14 @@
     padding: 0;
     border: 0;
     background: transparent;
+    box-shadow: var(--shadow-raised, none);
     border-radius: var(--kit-control-radius, var(--radius-sm));
     color: var(--text-muted);
     cursor: pointer;
     transition:
       background var(--transition-fast) var(--transition-ease, ease),
-      color var(--transition-fast) var(--transition-ease, ease);
+      color var(--transition-fast) var(--transition-ease, ease),
+      box-shadow var(--transition-fast) var(--transition-ease, ease);
   }
 
   .kit-icon-button--sm {
@@ -111,6 +124,14 @@
   .kit-icon-button:hover:not(:disabled):not([aria-disabled="true"]) {
     background: var(--bg-surface-hover);
     color: var(--text-primary);
+  }
+
+  .kit-icon-button:where(
+    [aria-pressed="true"],
+    [aria-expanded="true"],
+    :active:not(:disabled):not([aria-disabled="true"])
+  ) {
+    box-shadow: var(--shadow-sunken, none);
   }
 
   .kit-icon-button[aria-pressed="true"] {

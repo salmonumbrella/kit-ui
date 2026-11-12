@@ -4,6 +4,7 @@ export type { FieldState, FormFieldType } from "./FormField.svelte";
 export { default as Notice } from "./Notice.svelte";
 export type { NoticeTone } from "./Notice.svelte";
 export { default as PageFrame } from "./PageFrame.svelte";
+export { default as Accordion } from "./components/Accordion.svelte";
 export { default as AdaptiveActionGrid } from "./components/AdaptiveActionGrid.svelte";
 export type {
   AdaptiveActionGridFrame,
@@ -13,6 +14,14 @@ export type {
   AdaptiveActionGridRadius,
   AdaptiveActionGridSpace,
 } from "./components/AdaptiveActionGrid.svelte";
+export { default as AppSidebar } from "./components/AppSidebar.svelte";
+export type {
+  SidebarGroup,
+  SidebarLocation,
+  SidebarSection,
+  SidebarView,
+  SidebarViewRun,
+} from "./components/AppSidebar.svelte";
 export { default as BottomDock } from "./components/BottomDock.svelte";
 export { default as Button } from "./components/Button.svelte";
 export type { ButtonSize, ButtonSurface, ButtonTone } from "./components/Button.svelte";
@@ -25,13 +34,17 @@ export type { ChipSize, ChipTone } from "./components/Chip.svelte";
 export { default as ChipStack } from "./components/ChipStack.svelte";
 export { default as CodeBlock } from "./components/CodeBlock.svelte";
 export { default as CollapsibleSidebar } from "./components/CollapsibleSidebar.svelte";
+export { default as ColorInput } from "./components/ColorInput.svelte";
+export type { ColorInputSize, ColorInputSwatch } from "./components/ColorInput.svelte";
 export { default as ColorLabel } from "./components/ColorLabel.svelte";
 export type { ColorLabelSize } from "./components/ColorLabel.svelte";
 export { default as CommandPalette } from "./components/CommandPalette.svelte";
 export { default as CommentCard } from "./components/CommentCard.svelte";
-export type { PaletteCommand } from "./components/CommandPalette.svelte";
+export type { PaletteCommand, PaletteLeaf } from "./components/CommandPalette.svelte";
 export { default as CopyButton } from "./components/CopyButton.svelte";
 export { default as DetailDrawer } from "./components/DetailDrawer.svelte";
+export { default as Disclosure } from "./components/Disclosure.svelte";
+export type { DisclosureVariant } from "./components/Disclosure.svelte";
 export { default as DiffStats, formatDiffStat } from "./components/DiffStats.svelte";
 export { default as EmptyState } from "./components/EmptyState.svelte";
 export { default as FilterDropdown } from "./components/FilterDropdown.svelte";
@@ -60,15 +73,18 @@ export { default as MenuRadioGroup } from "./components/MenuRadioGroup.svelte";
 export { default as MenuRadioItem } from "./components/MenuRadioItem.svelte";
 export { default as MenuSeparator } from "./components/MenuSeparator.svelte";
 export { default as MenuTrigger } from "./components/MenuTrigger.svelte";
-export type { MenuAlign } from "./components/menu.js";
+export type { MenuAlign, MenuAnchorPoint } from "./components/menu.js";
 export { default as MentionTextarea } from "./components/MentionTextarea.svelte";
 export type { MentionOption, MentionTrigger } from "./components/mention.js";
 export { default as MetricCard } from "./components/MetricCard.svelte";
 export { default as Modal } from "./components/Modal.svelte";
 export type { ModalTone } from "./components/Modal.svelte";
+export { default as NumberInput } from "./components/NumberInput.svelte";
+export { default as PageHeader } from "./components/PageHeader.svelte";
 export { default as ProviderBrandMark } from "./components/ProviderBrandMark.svelte";
 export { default as ProviderButton } from "./components/ProviderButton.svelte";
 export type { ProviderBrand } from "./components/provider-brand.js";
+export { default as DatePicker } from "./components/DatePicker.svelte";
 export { default as DateRangePicker } from "./components/DateRangePicker.svelte";
 export {
   allFromDate,
@@ -83,9 +99,11 @@ export {
   stepAnchor,
   todayStr,
   weekdayLabels,
+  activityStep,
   type CalendarNavLabels,
   type CalendarSelection,
   type CalendarUnit,
+  type WeekStart,
   type CustomSelection,
   type DateRange,
   type RangeMode,
@@ -93,8 +111,18 @@ export {
   type RangeSelection,
   type RelativeSelection,
 } from "./components/date-range.js";
+export { default as RadioGroup } from "./components/RadioGroup.svelte";
+export type { RadioGroupOption } from "./components/RadioGroup.svelte";
 export { default as RefreshControl } from "./components/RefreshControl.svelte";
 export { default as ScrollBox } from "./components/ScrollBox.svelte";
+export { default as SearchByMeaningRow } from "./components/SearchByMeaningRow.svelte";
+export { default as SearchByMeaningHint } from "./components/SearchByMeaningHint.svelte";
+export { formatSize } from "./components/search-by-meaning.js";
+export type {
+  SearchByMeaningState,
+  SearchByMeaningLabels,
+} from "./components/search-by-meaning.js";
+
 export { default as SearchInput } from "./components/SearchInput.svelte";
 export { default as SegmentedControl } from "./components/SegmentedControl.svelte";
 export type {
@@ -122,8 +150,22 @@ export { default as StructuredList } from "./components/StructuredList.svelte";
 export type { StructuredListLevel } from "./components/StructuredList.svelte";
 export { default as StructuredListRow } from "./components/StructuredListRow.svelte";
 export { default as Table } from "./components/Table.svelte";
+export { default as Tabs } from "./components/Tabs.svelte";
+export type { TabItem, TabsActivation } from "./components/Tabs.svelte";
 export { default as TableHeaderCell } from "./components/TableHeaderCell.svelte";
-export type { SortDirection } from "./components/TableHeaderCell.svelte";
+export type { ColumnResize } from "./components/table-columns.js";
+export { TableSort } from "./components/table-sort.svelte.js";
+export {
+  compareSortValues,
+  nextSort,
+  sortRows,
+  type SortColumn,
+  type SortColumns,
+  type SortDirection,
+  type SortState,
+  type SortValue,
+  type TableSortControl,
+} from "./components/table-sort.js";
 export { default as TextInput } from "./components/TextInput.svelte";
 export type { TextInputSize } from "./components/TextInput.svelte";
 export { default as ThemeToggle } from "./components/ThemeToggle.svelte";
@@ -139,11 +181,19 @@ export type {
   TopBarTabIndicatorTone,
 } from "./components/TopBar.svelte";
 export { default as Typeahead } from "./components/Typeahead.svelte";
-export type { TypeaheadInputAttributes, TypeaheadOption } from "./components/typeahead.js";
+export type {
+  TypeaheadInputAttributes,
+  TypeaheadOption,
+  TypeaheadTriggerProps,
+} from "./components/typeahead.js";
+export { default as VideoPlayer } from "./components/VideoPlayer.svelte";
 export { default as VirtualList } from "./components/VirtualList.svelte";
+export { default as VirtualTable } from "./components/VirtualTable.svelte";
 export {
   offsetOfIndex,
   virtualSlice,
+  visibleWindow,
+  type VerticalBounds,
   type VirtualSlice,
   type VirtualSliceInput,
 } from "./components/virtual.js";
@@ -157,7 +207,9 @@ export {
   getFlash,
   getFlashes,
   getFlashMessage,
+  runFlashAction,
   showFlash,
+  type FlashAction,
   type FlashOptions,
   type FlashState,
   type FlashTone,
@@ -179,17 +231,61 @@ export {
 } from "./stores/theme.svelte.js";
 
 // Utilities
+export {
+  startBrowserTelemetry,
+  type AppOpenedEvent,
+  type BrowserTelemetryEvent,
+  type BrowserTelemetryOptions,
+  type BrowserTelemetryQuietReason,
+  type BrowserTelemetryReporter,
+  type ScreenViewedEvent,
+  type TelemetryReceipt,
+  type VisitEvent,
+  type VisitOptions,
+} from "./utils/browser-telemetry.js";
 export { copyToClipboard } from "./utils/clipboard.js";
+export {
+  contrastRatio,
+  mixHexColors,
+  parseHexColor,
+  readableInk,
+  relativeLuminance,
+  WCAG_AA_NON_TEXT,
+  WCAG_AA_TEXT,
+} from "./utils/color-contrast.js";
 export { DEFAULT_HASH_PALETTE, hashColor } from "./utils/color-hash.js";
+export {
+  createPalette,
+  PALETTES,
+  seriesDashArray,
+  seriesPattern,
+  seriesSwatchBackground,
+  type Palette,
+  type PaletteName,
+  type PaletteOptions,
+  type PaletteOrder,
+  type SeriesDash,
+  type SeriesFill,
+  type SeriesMarker,
+  type SeriesPattern,
+  type SeriesStyle,
+} from "./utils/palette.js";
 export { debounce, type DebouncedFn } from "./utils/debounce.js";
 export { trapFocus } from "./utils/focus-trap.js";
 export { autoReposition, dismissable, type DismissableOptions } from "./utils/popover.js";
 export { backdropCloses, escapeCloses } from "./utils/overlay.js";
-export { formatCost, formatDuration, formatNumber, formatTokenCount } from "./utils/format.js";
+export {
+  formatCost,
+  formatCount,
+  formatDuration,
+  formatNumber,
+  formatTokenCount,
+} from "./utils/format.js";
 export {
   createRefreshScheduler,
   DEFAULT_REFRESH_INTERVAL_MS,
   formatRefreshAge,
+  type RefreshReason,
   type RefreshScheduler,
 } from "./utils/refresh.js";
 export {
@@ -207,12 +303,15 @@ export {
   type ShortcutOptions,
 } from "./utils/shortcuts.js";
 export {
+  applyShikiStyles,
   codeFenceLanguage,
   createMarkdownRenderer,
   escapeHtml,
   highlightCode,
   renderMarkdown,
   renderMarkdownSync,
+  DEFAULT_MARKDOWN_ALERT_LABELS,
+  type MarkdownAlertKind,
   type MarkdownRenderer,
   type MarkdownRendererOptions,
 } from "./utils/markdown.js";
@@ -229,8 +328,17 @@ export {
   unregisterMediaViewerItem,
   type MediaViewerItem,
   type MediaViewerLabels,
+  type MediaViewerVideoItem,
+  type MediaViewerVideoState,
   type OpenMediaViewerOptions,
 } from "./utils/media-gallery.js";
-export { attachPanZoom, type PanZoom, type PanZoomOptions } from "./utils/pan-zoom.js";
+export {
+  actualPixelSize,
+  attachPanZoom,
+  type PanZoom,
+  type PanZoomLimits,
+  type PanZoomOptions,
+  type PanZoomView,
+} from "./utils/pan-zoom.js";
 export { formatRelativeTime, formatTimestamp, truncate } from "./utils/time.js";
 export { floatingPopoverStyle, type FloatingPopoverInput } from "./components/floatingPosition.js";

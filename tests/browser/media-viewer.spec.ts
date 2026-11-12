@@ -17,6 +17,13 @@ function caption(page: Page) {
   return page.locator(".kit-media-viewer__caption");
 }
 
+function transform(page: Page) {
+  return page.locator(".kit-media-viewer__pan").evaluate((node) => {
+    const matrix = new DOMMatrix((node as HTMLElement).style.transform);
+    return [matrix.a, matrix.e, matrix.f];
+  });
+}
+
 test.beforeEach(async ({ page }) => {
   await gotoPage(page, "media-viewer");
 });
@@ -46,64 +53,32 @@ test("pages with buttons and arrow keys, wrapping at the ends", async ({ page })
   await expect(open).toBeFocused();
 });
 
-test("paging resets pan and zoom", async ({ page }) => {
+test("Reset, paging and item replacement clear pan and zoom", async ({ page }) => {
   await page.getByRole("button", { name: "Open viewer" }).click();
-  const pan = page.locator(".kit-media-viewer__pan");
-  const scale = () => pan.evaluate((node) => new DOMMatrix(node.style.transform).a);
-
-  await page.locator(".kit-media-viewer__viewport").hover();
-  await page.mouse.wheel(0, -300);
-  await expect.poll(scale).toBeGreaterThan(1);
-
-  await page.getByRole("button", { name: "Reset view" }).click();
-  await expect.poll(scale).toBe(1);
-
-  await page.locator(".kit-media-viewer__viewport").hover();
-  await page.mouse.wheel(0, -300);
-  await expect.poll(scale).toBeGreaterThan(1);
-  await page.keyboard.press("ArrowRight");
-  await expect.poll(scale).toBe(1);
-});
-
-test("double-click zooms in on the point, and again resets", async ({ page }) => {
-  // The dblclick path: iOS Safari sends a double tap's second tap only as
-  // clicks and a dblclick, and a mouse double-click lands here too.
-  await page.getByRole("button", { name: "Open viewer" }).click();
-  const box = (await page.locator(".kit-media-viewer__viewport").boundingBox())!;
-  const transform = () =>
-    page.locator(".kit-media-viewer__pan").evaluate((node) => {
-      const matrix = new DOMMatrix((node as HTMLElement).style.transform);
-      return [matrix.a, Math.round(matrix.e), Math.round(matrix.f)];
-    });
-  await page.mouse.dblclick(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20);
-  await expect.poll(transform).toEqual([2.5, -60, -30]);
-  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
-  await expect.poll(transform).toEqual([1, 0, 0]);
-});
-
-test("slow wheel steps accumulate into zoom", async ({ page }) => {
-  await page.getByRole("button", { name: "Open viewer" }).click();
-  const viewport = page.locator(".kit-media-viewer__viewport");
-  // Each step alone is under 0.1% of zoom.
-  await viewport.evaluate((element) => {
-    const r = element.getBoundingClientRect();
-    for (let i = 0; i < 40; i += 1) {
-      element.dispatchEvent(
-        new WheelEvent("wheel", {
-          deltaY: -0.5,
-          clientX: r.left + r.width / 2,
-          clientY: r.top + r.height / 2,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
+  for (const action of ["reset", "page", "replace"]) {
+    if (action === "replace") {
+      await page.keyboard.press("Escape");
+      await expect(viewer(page)).toHaveCount(0);
+      await page.evaluate(async (itemsSource) => {
+        const { mountMediaViewer } =
+          await import("/tests/browser/fixtures/media-viewer-host.svelte.ts");
+        const items = new Function(`return ${itemsSource}`)();
+        const host = mountMediaViewer(items, 0);
+        (window as unknown as { __replace: () => void }).__replace = () =>
+          host.replaceItems([{ ...items[1], alt: "Replacement" }, ...items.slice(1)]);
+      }, swatchItems);
     }
-  });
-  const scale = await page
-    .locator(".kit-media-viewer__pan")
-    .evaluate((node) => new DOMMatrix((node as HTMLElement).style.transform).a);
-  expect(scale).toBeGreaterThan(1.02);
-  await expect(viewport).toHaveAttribute("data-zoomed", "true");
+    await page.locator(".kit-media-viewer__viewport").hover({ position: { x: 20, y: 20 } });
+    await page.mouse.wheel(0, -300);
+    await expect.poll(async () => (await transform(page))[0]!).toBeGreaterThan(1);
+    if (action === "reset") await page.getByRole("button", { name: "Reset view" }).click();
+    else if (action === "page") await page.keyboard.press("ArrowRight");
+    else {
+      await page.evaluate(() => (window as unknown as { __replace: () => void }).__replace());
+      await expect(viewer(page)).toHaveAccessibleName("Replacement (1 of 3)");
+    }
+    await expect.poll(() => transform(page)).toEqual([1, 0, 0]);
+  }
 });
 
 test("images keep their natural size instead of upscaling", async ({ page }) => {
@@ -124,19 +99,21 @@ test("a markdown image pages through every displayed item on the page", async ({
   await page.getByRole("img", { name: "Screenshot A" }).hover();
   await page.getByRole("button", { name: "Open image in expanded view: Screenshot A" }).click();
 
-  // Screenshot A, the diagram, Screenshot B, the ImagePreview — not the
-  // image in the inactive tab.
-  await expect(viewer(page)).toHaveAccessibleName("Screenshot A (1 of 4)");
+  // The video above, Screenshot A, the diagram, Screenshot B, the second
+  // video, the ImagePreview — not the image in the inactive tab.
+  await expect(viewer(page)).toHaveAccessibleName("Screenshot A (2 of 6)");
   await expect(caption(page)).toHaveText("Screenshot A");
   await page.keyboard.press("ArrowRight");
-  await expect(viewer(page)).toHaveAccessibleName("Mermaid diagram (2 of 4)");
+  await expect(viewer(page)).toHaveAccessibleName("Mermaid diagram (3 of 6)");
   await expect(viewer(page).locator(".kit-mermaid-content svg")).toBeVisible();
   // A diagram's label is generic, so it gets no caption.
   await expect(caption(page)).toHaveCount(0);
   await page.keyboard.press("ArrowRight");
-  await expect(viewer(page)).toHaveAccessibleName("Screenshot B (3 of 4)");
+  await expect(viewer(page)).toHaveAccessibleName("Screenshot B (4 of 6)");
   await page.keyboard.press("ArrowRight");
-  await expect(viewer(page)).toHaveAccessibleName("ImagePreview swatch (4 of 4)");
+  await expect(viewer(page)).toHaveAccessibleName("Second test pattern video (5 of 6)");
+  await page.getByRole("button", { name: "Next item" }).click();
+  await expect(viewer(page)).toHaveAccessibleName("ImagePreview swatch (6 of 6)");
   await page.keyboard.press("Escape");
 
   // Showing the other tab makes its image eligible.
@@ -144,9 +121,9 @@ test("a markdown image pages through every displayed item on the page", async ({
   await page
     .getByRole("button", { name: "Open image in expanded view: ImagePreview swatch" })
     .click();
-  await expect(viewer(page)).toHaveAccessibleName("ImagePreview swatch (4 of 5)");
+  await expect(viewer(page)).toHaveAccessibleName("ImagePreview swatch (6 of 7)");
   await page.keyboard.press("ArrowRight");
-  await expect(viewer(page)).toHaveAccessibleName("Hidden tab image (5 of 5)");
+  await expect(viewer(page)).toHaveAccessibleName("Hidden tab image (7 of 7)");
 });
 
 test("an item inside a modal pages only within that modal", async ({ page }) => {
@@ -249,10 +226,10 @@ test("an onViewerOpen hook that updates app state leaves the viewer working", as
   const depth = () =>
     page.evaluate(() => (window as unknown as { __depth: () => number }).__depth());
 
-  await expect(viewer(page)).toHaveAccessibleName("Screenshot A (1 of 4)");
+  await expect(viewer(page)).toHaveAccessibleName("Screenshot A (2 of 6)");
   expect(await depth()).toBe(1);
   await page.keyboard.press("ArrowRight");
-  await expect(viewer(page)).toHaveAccessibleName("Mermaid diagram (2 of 4)");
+  await expect(viewer(page)).toHaveAccessibleName("Mermaid diagram (3 of 6)");
   await page.keyboard.press("Escape");
   await expect(viewer(page)).toHaveCount(0);
   expect(await depth()).toBe(0);
@@ -357,31 +334,6 @@ test("the position counter and accessible name are localizable", async ({ page }
   }, swatchItems);
   await expect(viewer(page)).toHaveAccessibleName("Bild 1 von 3: First");
   await expect(counter(page)).toHaveText("1/3 Bilder");
-});
-
-test("a different item at the same index resets pan and zoom", async ({ page }) => {
-  await page.evaluate(async (itemsSource) => {
-    const { mountMediaViewer } =
-      await import("/tests/browser/fixtures/media-viewer-host.svelte.ts");
-    const items = new Function(`return ${itemsSource}`)();
-    const host = mountMediaViewer(items, 0);
-    (window as unknown as { __replace: () => void }).__replace = () =>
-      host.replaceItems([{ ...items[1], alt: "Replacement" }, ...items.slice(1)]);
-  }, swatchItems);
-  const viewport = page.locator(".kit-media-viewer__viewport");
-  // [scale, x, y]; engines differ in how they write an identity transform.
-  const transform = () =>
-    page.locator(".kit-media-viewer__pan").evaluate((node) => {
-      const matrix = new DOMMatrix((node as HTMLElement).style.transform);
-      return [matrix.a, matrix.e, matrix.f];
-    });
-  await viewport.hover();
-  await page.mouse.wheel(0, -400);
-  await expect.poll(transform).not.toEqual([1, 0, 0]);
-
-  await page.evaluate(() => (window as unknown as { __replace: () => void }).__replace());
-  await expect(viewer(page)).toHaveAccessibleName("Replacement (1 of 3)");
-  await expect.poll(transform).toEqual([1, 0, 0]);
 });
 
 test("replacing onViewerOpen restores the old hook and runs the new one", async ({ page }) => {

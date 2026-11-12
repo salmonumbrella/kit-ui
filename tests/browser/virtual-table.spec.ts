@@ -1,0 +1,1309 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import { gotoPage } from "./helpers.js";
+
+// VirtualTable (docs/components/virtual-table.md): only on-screen rows are in
+// the DOM, whichever container scrolls the table, while stripes, column
+// widths, and row numbering match a full table.
+
+const bounded = (page: Page) => page.locator('table[aria-label="Reviews"]');
+const inFlow = (page: Page) => page.locator('table[aria-label="Reviews on the page"]');
+const dataRows = (table: Locator) => table.locator("tbody > tr:not(.kit-virtual-table__spacer)");
+
+async function scrollWrapper(table: Locator, to: "middle" | "bottom"): Promise<void> {
+  await table.evaluate((el, where) => {
+    const wrapper = el.parentElement!;
+    wrapper.scrollTop =
+      where === "bottom" ? wrapper.scrollHeight : (wrapper.scrollHeight - wrapper.clientHeight) / 2;
+  }, to);
+}
+
+test("renders a window of 10k rows and reaches the last one", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const rendered = await dataRows(table).count();
+  expect(rendered).toBeGreaterThan(5);
+  expect(rendered).toBeLessThan(60);
+  await expect(table).toHaveAttribute("aria-rowcount", "10001");
+
+  await scrollWrapper(table, "bottom");
+  const last = dataRows(table).last();
+  await expect(last).toContainText("#9999");
+  await expect(last).toHaveAttribute("aria-rowindex", "10001");
+  // The last row sits at the bottom of the scrolled wrapper, not past it.
+  const gap = await last.evaluate((row) => {
+    const wrapper = row.closest(".kit-table-wrapper")!;
+    return wrapper.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom;
+  });
+  expect(Math.abs(gap)).toBeLessThan(2);
+});
+
+test("stripes rows by their index and keeps column widths while scrolling", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const widths = () =>
+    table
+      .locator("thead th")
+      .evaluateAll((cells) => cells.map((c) => c.getBoundingClientRect().width));
+  const before = await widths();
+
+  const stripes = () =>
+    dataRows(table).evaluateAll((rows) =>
+      rows.map((row) => ({
+        index: Number(row.getAttribute("aria-rowindex")) - 2,
+        background: getComputedStyle(row).backgroundColor,
+      })),
+    );
+  const top = await stripes();
+  const plain = top.find((r) => r.index % 2 === 0)!.background;
+  const striped = top.find((r) => r.index % 2 === 1)!.background;
+  expect(striped).not.toBe(plain);
+
+  // Windows starting on odd and even indexes stripe the same rows.
+  for (const step of [1, 2]) {
+    await table.evaluate((el, by) => (el.parentElement!.scrollTop += 37 * by * 101), step);
+    await page.mouse.move(0, 0);
+    await expect
+      .poll(async () =>
+        (await stripes()).every((r) => r.background === (r.index % 2 ? striped : plain)),
+      )
+      .toBe(true);
+  }
+
+  await scrollWrapper(table, "middle");
+  await expect.poll(widths).toEqual(before);
+});
+
+test("keeps links in rows and re-windows after sorting", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first().getByRole("link")).toBeVisible();
+  await table.getByRole("button", { name: "ID" }).click();
+  await expect(dataRows(table).first()).toContainText("#9999");
+  await expect(dataRows(table).first()).toHaveAttribute("aria-rowindex", "2");
+});
+
+test("follows the page's scroll container when the table is unbounded", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await expect(table).toHaveAttribute("aria-rowcount", "2001");
+  // Bring the table's middle on screen by scrolling whatever scrolls it.
+  await table.evaluate((el) => {
+    const middle = el.querySelector("tbody")!;
+    const rect = middle.getBoundingClientRect();
+    let scroller: Element | null = el.parentElement;
+    while (scroller && scroller.scrollHeight <= scroller.clientHeight)
+      scroller = scroller.parentElement;
+    scroller!.scrollTop += rect.top + rect.height / 2;
+  });
+  await expect
+    .poll(() =>
+      dataRows(table).evaluateAll((rows) => {
+        const indexes = rows.map((r) => Number(r.getAttribute("aria-rowindex")) - 2);
+        const visible = rows.some((r) => {
+          const box = r.getBoundingClientRect();
+          return box.bottom > 0 && box.top < window.innerHeight;
+        });
+        return { first: indexes[0]! > 500, few: rows.length < 80, visible };
+      }),
+    )
+    .toEqual({ first: true, few: true, visible: true });
+});
+
+test("lays out a table that was hidden when it rendered", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  // Scrolling here measures rows in the table above and moves the summary.
+  // Activate by keyboard so that movement cannot send a click to the background.
+  await page.locator("summary", { hasText: "Show 2,000 reviews" }).press("Enter");
+  const table = page.locator('table[aria-label="Hidden reviews"]');
+  await expect(dataRows(table).first()).toBeVisible();
+  const widths = await table
+    .locator("thead th")
+    .evaluateAll((cells) => cells.map((c) => c.getBoundingClientRect().width));
+  for (const width of widths) expect(width).toBeGreaterThan(40);
+  const rendered = await dataRows(table).count();
+  expect(rendered).toBeGreaterThan(5);
+  expect(rendered).toBeLessThan(80);
+});
+
+test("a table the page scrolls keeps its header at the top of the page", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await expect(table).toHaveAttribute("aria-rowcount", "2001");
+  // The page-scrolled wrapper must not become the header's scroll container.
+  await expect(table.locator("xpath=..")).toHaveCSS("overflow-y", "clip");
+  const scroller = await table.evaluateHandle((el) => {
+    let s: Element | null = el.parentElement;
+    while (s && s.scrollHeight <= s.clientHeight) s = s.parentElement;
+    return s!;
+  });
+  await scroller.evaluate(
+    (s, el) => {
+      s.scrollTop += el!.getBoundingClientRect().top - s.getBoundingClientRect().top + 3000;
+    },
+    await table.elementHandle(),
+  );
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const head = el.tHead!.getBoundingClientRect();
+        let s: Element | null = el.parentElement;
+        while (s && s.scrollHeight <= s.clientHeight) s = s.parentElement;
+        return {
+          atTop: Math.abs(head.top - s!.getBoundingClientRect().top) < 2,
+          shadowed: el.classList.contains("kit-table--scrolled"),
+        };
+      }),
+    )
+    .toEqual({ atTop: true, shadowed: true });
+});
+
+test("an unbroken value outside the first rows wraps inside its pinned column", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Row heights vary, so step toward row 6000 until it renders.
+  for (let step = 0; step < 8; step += 1) {
+    const first = Number(await dataRows(table).first().getAttribute("aria-rowindex")) - 2;
+    const last = Number(await dataRows(table).last().getAttribute("aria-rowindex")) - 2;
+    if (first <= 6000 && 6000 < last) break;
+    await table.evaluate((el, delta) => {
+      const wrapper = el.parentElement!;
+      wrapper.scrollTop += (delta * wrapper.scrollHeight) / 10000;
+    }, 6000 - first);
+    await page.waitForTimeout(50);
+  }
+  const cell = table.locator("td.branch", { hasText: "fix/anunbrokenname" });
+  await expect(cell).toBeVisible();
+  const box = await cell.evaluate((td) => ({
+    overflow: td.scrollWidth - td.clientWidth,
+    width: td.getBoundingClientRect().width,
+  }));
+  expect(box.overflow).toBeLessThanOrEqual(0);
+});
+
+// The page scroller in the gallery sets --kit-table-sticky-top: -20px for its
+// padding; a table scrolling in its own box must not use it.
+test("a table that scrolls in its own box sticks its header to the box's top", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  await scrollWrapper(table, "middle");
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const wrapper = el.parentElement!;
+        return Math.round(
+          el.tHead!.getBoundingClientRect().top -
+            (wrapper.getBoundingClientRect().top + wrapper.clientTop),
+        );
+      }),
+    )
+    .toBe(0);
+});
+
+// The page-scrolled table clips without scrolling, so in a flex row only
+// min-width: 0 stops it growing to the table's width.
+test("a wide table in a flex row scrolls sideways instead of widening its box", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await expect(table).toHaveAttribute("aria-rowcount", "2001");
+  // Columns re-pin to fit a narrower box and text wraps, so only a table
+  // that cannot shrink below the box (here a minimum width) overflows it.
+  await table.evaluate((el) => {
+    el.style.minWidth = "800px";
+    const flow = el.closest(".flow") as HTMLElement;
+    flow.style.display = "flex";
+    flow.style.width = "260px";
+  });
+  // A clipping box also reports scrollWidth > clientWidth, but it cannot be
+  // scrolled, so only a real scroll shows the hidden columns are reachable.
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const wrapper = el.parentElement!;
+        wrapper.scrollLeft = 100;
+        return {
+          fits: wrapper.getBoundingClientRect().width <= 262,
+          scrolled: wrapper.scrollLeft > 0,
+        };
+      }),
+    )
+    .toEqual({ fits: true, scrolled: true });
+});
+
+test("pinned widths do not add padding again when the app uses content-box sizing", async ({
+  page,
+}) => {
+  // The app's content-box rule is in place before the columns are sized.
+  await page.addInitScript(() => {
+    document.addEventListener("DOMContentLoaded", () => {
+      const style = document.createElement("style");
+      style.textContent = ".kit-table th, .kit-table td { box-sizing: content-box; }";
+      document.head.append(style);
+    });
+  });
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Each header cell is drawn at its pinned width, padding included, so the
+  // table fills its box exactly.
+  await expect
+    .poll(() =>
+      table.evaluate((el) => ({
+        drawnAsPinned: [...el.tHead!.rows[0]!.cells].every(
+          (c) => Math.abs(c.getBoundingClientRect().width - parseFloat(c.style.width)) < 1,
+        ),
+        overflow: el.offsetWidth - el.parentElement!.clientWidth,
+      })),
+    )
+    .toEqual({ drawnAsPinned: true, overflow: 0 });
+});
+
+test("rows fill space revealed when a scroller above the table grows", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await expect(table).toHaveAttribute("aria-rowcount", "2001");
+  const scroller = page.locator(".content__body");
+  // Shrink the scroller, scroll into the table, then let it grow back with
+  // no change to the table or the window.
+  await scroller.evaluate((s) => ((s as HTMLElement).style.maxHeight = "200px"));
+  await scroller.evaluate(
+    (s, el) => {
+      s.scrollTop += el!.getBoundingClientRect().top - s.getBoundingClientRect().top + 5000;
+    },
+    await table.elementHandle(),
+  );
+  await page.waitForTimeout(100);
+  await scroller.evaluate((s) => ((s as HTMLElement).style.maxHeight = ""));
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const s = document.querySelector(".content__body")!.getBoundingClientRect();
+        const rows = el.querySelectorAll("tbody > tr:not(.kit-virtual-table__spacer)");
+        const last = rows[rows.length - 1]!.getBoundingClientRect().bottom;
+        return last >= Math.min(s.bottom, el.getBoundingClientRect().bottom) - 1;
+      }),
+    )
+    .toBe(true);
+});
+
+test("hiding a column re-pins the widths without a phantom column", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  await page.getByRole("checkbox", { name: "Show the Branch column" }).uncheck();
+  await expect(table.locator("thead th")).toHaveCount(4);
+  await expect
+    .poll(() =>
+      table.evaluate((el) => ({
+        spacerColspan: el.querySelector<HTMLTableCellElement>(".kit-virtual-table__spacer td")!
+          .colSpan,
+        fills:
+          Math.abs(
+            [...el.tHead!.rows[0]!.cells].reduce(
+              (sum, c) => sum + c.getBoundingClientRect().width,
+              0,
+            ) - el.getBoundingClientRect().width,
+          ) < 2,
+      })),
+    )
+    .toEqual({ spacerColspan: 4, fills: true });
+});
+
+// Content above the table collapsing neither scrolls nor resizes the
+// scroller, so the app calls refresh(), as the demo's button does. Scroll
+// anchoring would hide the move, so it is off here.
+test("refresh() fills the view after content above the table collapses", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await expect(table).toHaveAttribute("aria-rowcount", "2001");
+  const scroller = page.locator(".content__body");
+  // Put a tall block before the table and scroll until only the table's
+  // first 100px show, then remove the block without scrolling.
+  await table.evaluate((el) => {
+    (document.querySelector(".content__body") as HTMLElement).style.overflowAnchor = "none";
+    const block = document.createElement("div");
+    block.id = "collapsible";
+    block.style.height = "600px";
+    el.closest(".flow")!.before(block);
+  });
+  await scroller.evaluate(
+    (s, el) => {
+      const bottom = s.getBoundingClientRect().bottom;
+      s.scrollTop += el!.getBoundingClientRect().top - (bottom - 100);
+    },
+    await table.elementHandle(),
+  );
+  await page.waitForTimeout(100);
+  await page.locator("#collapsible").evaluate((block) => block.remove());
+  await page.getByRole("button", { name: "Refresh the table" }).click();
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const s = document.querySelector(".content__body")!.getBoundingClientRect();
+        const rows = el.querySelectorAll("tbody > tr:not(.kit-virtual-table__spacer)");
+        const last = rows[rows.length - 1]!.getBoundingClientRect().bottom;
+        return last >= Math.min(s.bottom, el.getBoundingClientRect().bottom) - 1;
+      }),
+    )
+    .toBe(true);
+});
+
+test("a populated table below the fold never shows its empty row", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = page.locator('table[aria-label="Reviews without overscan"]');
+  await expect(table).toHaveAttribute("aria-rowcount", "301");
+  await expect(table.getByText("No reviews")).toHaveCount(0);
+  await table.evaluate((el) => {
+    const s = document.querySelector(".content__body")!;
+    s.scrollTop += el.getBoundingClientRect().top - s.getBoundingClientRect().top;
+  });
+  await expect(dataRows(table).first()).toContainText("#0");
+  await expect(table.getByText("No reviews")).toHaveCount(0);
+  // Data rows give the ID column only its numbers' width; headers alone
+  // would split the width between the two short labels.
+  const id = await table
+    .locator("thead th")
+    .first()
+    .evaluate((th) => th.getBoundingClientRect().width);
+  expect(id).toBeLessThan(150);
+});
+
+test("a resize while no rows render does not pin widths from the header", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = page.locator('table[aria-label="Reviews without overscan"]');
+  await expect(table).toHaveAttribute("aria-rowcount", "301");
+  const scroller = page.locator(".content__body");
+  const toTable = async () =>
+    scroller.evaluate(
+      (s, el) => {
+        s.scrollTop += el!.getBoundingClientRect().top - s.getBoundingClientRect().top;
+      },
+      await table.elementHandle(),
+    );
+  await toTable();
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Scroll far above the table so its rows unmount, then resize.
+  await scroller.evaluate((s) => (s.scrollTop = 0));
+  await expect(dataRows(table)).toHaveCount(0);
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.waitForTimeout(200);
+  await toTable();
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Data rows give the ID column only its numbers' width; headers alone
+  // would split the width between the two short labels.
+  const id = await table
+    .locator("thead th")
+    .first()
+    .evaluate((th) => th.getBoundingClientRect().width);
+  expect(id).toBeLessThan(150);
+});
+
+test("a visible row growing deep in the table does not move the rows above it", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Jump deep so thousands of rows above are unmeasured, with anchoring off.
+  await table.evaluate((el) => {
+    const wrapper = el.parentElement!;
+    wrapper.style.overflowAnchor = "none";
+    wrapper.scrollTop = wrapper.scrollHeight / 2;
+  });
+  await page.waitForTimeout(200);
+  const topIndex = () =>
+    table.evaluate((el) => {
+      const top = el.parentElement!.getBoundingClientRect().top + el.tHead!.offsetHeight;
+      const row = [...el.querySelectorAll("tbody > tr:not(.kit-virtual-table__spacer)")].find(
+        (r) => r.getBoundingClientRect().bottom > top,
+      )!;
+      return Number(row.getAttribute("aria-rowindex"));
+    });
+  const before = await topIndex();
+  // Grow a row lower in the view.
+  await table.evaluate((el) => {
+    const rows = el.querySelectorAll<HTMLElement>("tbody > tr:not(.kit-virtual-table__spacer)");
+    rows[Math.floor(rows.length / 2)]!.style.height = "400px";
+  });
+  await page.waitForTimeout(300);
+  expect(Math.abs((await topIndex()) - before)).toBeLessThanOrEqual(1);
+});
+
+// Switching scroll modes gives the table a new scroller and a new row
+// observer, while the rows on screen in both modes stay in the DOM. Those rows
+// must be watched again, or a later change in their height goes unnoticed.
+test("rows kept across a change of scroll mode are measured again", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await table.evaluate((el) => {
+    const scroller = document.querySelector(".content__body")!;
+    scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  });
+  const rows = dataRows(table);
+  await expect(rows.first()).toContainText("#0");
+  const first = await rows.first().elementHandle();
+  await page.getByRole("checkbox", { name: "Scroll inside a box instead" }).check();
+  await expect.poll(() => rows.first().evaluate((tr, kept) => tr === kept, first)).toBe(true);
+  // Row #0 alone now fills the 420px box, so only it and the 8 overscan rows
+  // below it belong in the window.
+  await rows.first().evaluate((tr: HTMLElement) => (tr.style.height = "2000px"));
+  await expect.poll(() => rows.count()).toBe(9);
+});
+
+// One row grows while another shrinks by the same amount, so the body keeps
+// its size and only per-row observation measures the trade. With stale
+// heights the grown first row counts as short, and scrolling inside it
+// drops it from the window.
+test("two rows trading height are both measured again", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = page.locator('table[aria-label="Reviews without overscan"]');
+  await expect(table).toHaveAttribute("aria-rowcount", "301");
+  const scroller = page.locator(".content__body");
+  const toTable = async (by: number) =>
+    scroller.evaluate(
+      (s, [el, offset]) => {
+        s.scrollTop +=
+          (el as Element).getBoundingClientRect().top - s.getBoundingClientRect().top + offset;
+      },
+      [await table.elementHandle(), by] as const,
+    );
+  await toTable(0);
+  const rows = dataRows(table);
+  await expect(rows.first()).toContainText("#0");
+  // Explicit heights, taller than either row's content, make the trade exact.
+  const setHeights = (first: string, second: string) =>
+    table.evaluate(
+      (el, [a, b]) => {
+        const [one, two] = el.querySelectorAll<HTMLElement>(
+          "tbody > tr:not(.kit-virtual-table__spacer)",
+        );
+        one!.style.height = a!;
+        two!.style.height = b!;
+      },
+      [first, second],
+    );
+  await setHeights("80px", "600px");
+  await page.waitForTimeout(200);
+  await setHeights("600px", "80px");
+  await page.waitForTimeout(200);
+  // The first row now spans the table's first 600px; a view 300px down is
+  // inside it. With stale heights the first row is dropped and scroll
+  // anchoring pulls the view away from where it was scrolled.
+  await toTable(300);
+  await expect(rows.first()).toHaveAttribute("aria-rowindex", "2");
+  await expect
+    .poll(() =>
+      rows.first().evaluate((tr) => {
+        const top = document.querySelector(".content__body")!.getBoundingClientRect().top;
+        return tr.getBoundingClientRect().top < top;
+      }),
+    )
+    .toBe(true);
+});
+
+test("rows cover the view while the wheel scrolls quickly", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const box = (await table.locator("xpath=..").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  let worst = 0;
+  for (let i = 0; i < 30; i += 1) {
+    await page.mouse.wheel(0, i < 20 ? 300 : -300);
+    const gap = await table.evaluate(
+      (el) =>
+        new Promise<number>((resolve) =>
+          requestAnimationFrame(() => {
+            const wrapper = el.parentElement!.getBoundingClientRect();
+            const head = el.tHead!.getBoundingClientRect().bottom;
+            const rows = el.querySelectorAll("tbody > tr:not(.kit-virtual-table__spacer)");
+            const first = rows[0]!.getBoundingClientRect().top;
+            const last = rows[rows.length - 1]!.getBoundingClientRect().bottom;
+            resolve(Math.max(0, first - head, wrapper.bottom - last));
+          }),
+        ),
+    );
+    worst = Math.max(worst, gap);
+  }
+  expect(worst).toBeLessThanOrEqual(1);
+});
+
+// A self-scrolling table whose rows were last computed while it was off
+// screen must render its whole box once the page brings it back, without
+// scrolling the box itself.
+test("a bounded table scrolled into view by the page fills its box", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const scroller = page.locator(".content__body");
+  // Scroll the page far past the table, then resize the window so the
+  // table recomputes its rows while off screen.
+  await scroller.evaluate((s) => (s.scrollTop = s.scrollHeight));
+  await expect(table.locator("xpath=..")).not.toBeInViewport();
+  await page.setViewportSize({ width: 1180, height: 760 });
+  await page.waitForTimeout(200);
+  await table.locator("xpath=..").evaluate((wrapper) => {
+    const s = document.querySelector(".content__body")!;
+    s.scrollTop += wrapper.getBoundingClientRect().top - s.getBoundingClientRect().top;
+  });
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const wrapper = el.parentElement!;
+        const top = el.tHead!.getBoundingClientRect().bottom;
+        const bottom =
+          wrapper.getBoundingClientRect().top + wrapper.clientTop + wrapper.clientHeight;
+        const rows = el.querySelectorAll("tbody > tr:not(.kit-virtual-table__spacer)");
+        const first = rows[0]!.getBoundingClientRect().top;
+        const last = rows[rows.length - 1]!.getBoundingClientRect().bottom;
+        return first <= top + 1 && last >= bottom - 1;
+      }),
+    )
+    .toBe(true);
+});
+
+// Rows sampled across the list set the pinned widths, so a value far down
+// the list fits its column even though the columns were pinned at the top.
+test("pinned columns fit values from the whole list, not only the first rows", async ({ page }) => {
+  // A narrow window leaves the columns no spare width to hide the problem.
+  await page.setViewportSize({ width: 700, height: 800 });
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  // The total height grows as taller rows near the end are measured, so
+  // keep scrolling to the bottom until the last row renders.
+  const last = dataRows(table).last();
+  await expect
+    .poll(async () => {
+      await scrollWrapper(table, "bottom");
+      return last.textContent();
+    })
+    .toContain("#9999");
+  const lines = await last
+    .locator("td")
+    .first()
+    .evaluate((td) => {
+      const range = document.createRange();
+      range.selectNodeContents(td);
+      return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+    });
+  expect(lines).toBe(1);
+});
+
+// In a bounded flex column that scrolls, a page-scrolled table must keep its
+// full height; a shrunk, clipping wrapper would hide the rows below.
+test("a page-scrolled table keeps its full height in a bounded flex column", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await expect(table).toHaveAttribute("aria-rowcount", "2001");
+  await table.evaluate((el) => {
+    const flow = el.closest(".flow") as HTMLElement;
+    flow.style.display = "flex";
+    flow.style.flexDirection = "column";
+    flow.style.height = "400px";
+    flow.style.overflowY = "auto";
+  });
+  await expect
+    .poll(() => table.evaluate((el) => el.parentElement!.clientHeight - el.offsetHeight))
+    .toBeGreaterThanOrEqual(-1);
+});
+
+// Sampled rows exist only while the columns are pinned, so none remain to
+// submit form fields or show up in queries for the table's rows.
+test("no sampled rows remain once the columns are pinned", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  await expect(table.locator("tbody > tr.kit-virtual-table__end ~ tr")).toHaveCount(0);
+  await expect(table).toHaveClass(/kit-virtual-table--pinned/);
+});
+
+// A refresh follows every scroll, resize, and row resize. One that finds
+// nothing changed leaves the table alone; rewriting the same values would
+// make the browser style and paint another frame for nothing.
+test("a refresh that changes nothing does not touch the table", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  await expect(table).toHaveClass(/kit-virtual-table--pinned/);
+  const changes = await table.evaluate(async (el) => {
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    // Let the refresh that follows mounting run first.
+    await frame();
+    await frame();
+    const seen: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const r of records) seen.push(`${r.type} ${r.attributeName ?? ""}`);
+    });
+    observer.observe(el, { subtree: true, attributes: true, childList: true, characterData: true });
+    // The window's resize event refreshes the widths and rows at once.
+    window.dispatchEvent(new Event("resize"));
+    await frame();
+    await frame();
+    observer.disconnect();
+    return seen;
+  });
+  expect(changes).toEqual([]);
+});
+
+test("new items keep the columns' widths", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const widths = () =>
+    table
+      .locator("thead th")
+      .evaluateAll((cells) => cells.map((c) => c.getBoundingClientRect().width));
+  const before = await widths();
+  await page.getByRole("checkbox", { name: "Use longer project names" }).check();
+  await expect(dataRows(table).first()).toContainText("with-a-longer-name");
+  expect(await widths()).toEqual(before);
+});
+
+const notesTable = (page: Page) => page.locator('table[aria-label="Review notes"]');
+const columnWidths = (table: Locator) =>
+  table
+    .locator("thead th")
+    .evaluateAll((cells) => cells.map((c) => Math.round(c.getBoundingClientRect().width)));
+
+test("dragging a header edge resizes the column", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const before = await columnWidths(table);
+  const handle = table.getByRole("separator", { name: "Resize the Project column" });
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 100, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const after = await columnWidths(table);
+  expect(after[2]! - before[2]!).toBeGreaterThanOrEqual(98);
+  // The table grows past its box rather than squeezing the other columns.
+  expect(after.slice(0, 2)).toEqual(before.slice(0, 2));
+  expect(after[3]).toBe(before[3]);
+});
+
+test("arrow keys on a header edge resize the column", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const before = await columnWidths(table);
+  await table.getByRole("separator", { name: "Resize the ID column" }).focus();
+  await page.keyboard.press("ArrowRight");
+  expect((await columnWidths(table))[0]).toBe(before[0]! + 24);
+});
+
+test("double-clicking a header edge fits the column to its widest value", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Squeeze the Branch column so its long values wrap, then fit it.
+  const handle = table.getByRole("separator", { name: "Resize the Branch column" });
+  await handle.focus();
+  for (let i = 0; i < 12; i += 1) await page.keyboard.press("ArrowLeft");
+  await handle.dblclick();
+  const lines = await table
+    .locator("td.branch", { hasText: "feature/a-much-longer" })
+    .first()
+    .evaluate((td) => {
+      const range = document.createRange();
+      range.selectNodeContents(td);
+      return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+    });
+  expect(lines).toBe(1);
+});
+
+test("a header's width and limits size its column", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = notesTable(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  expect((await columnWidths(table))[0]).toBe(90);
+  // Dragging far left stops at the Project column's 80px minimum.
+  const handle = table.getByRole("separator", { name: "Resize the Project column" });
+  await handle.scrollIntoViewIfNeeded();
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x - 400, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+  expect((await columnWidths(table))[1]).toBe(80);
+  // The app is told which column a person resized, by the header's
+  // `column`, and its width.
+  await expect(page.getByTestId("note-resize")).toHaveText("Last resized: project column, 80px");
+});
+
+test("a column nobody resized follows its header's width; a resized one keeps its own", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = notesTable(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const wider = page.getByRole("checkbox", { name: "Start the ID column at 120px" });
+  await wider.check();
+  await expect.poll(async () => (await columnWidths(table))[0]).toBe(120);
+  await wider.uncheck();
+  await expect.poll(async () => (await columnWidths(table))[0]).toBe(90);
+  // Once a person resizes it, the header's width no longer moves it.
+  await table.getByRole("separator", { name: "Resize the ID column" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByTestId("note-resize")).toHaveText("Last resized: id column, 114px");
+  await wider.check();
+  await page.waitForTimeout(100);
+  expect((await columnWidths(table))[0]).toBe(114);
+});
+
+test("fitColumn supplies the content width for a fit", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = notesTable(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  await table.getByRole("separator", { name: "Resize the ID column" }).dblclick();
+  // 40px of content plus the header cell's 10px padding on each side.
+  await expect.poll(async () => (await columnWidths(table))[0]).toBe(60);
+});
+
+test("without a fill column the last column takes the width a narrowed column gives up", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const before = await columnWidths(table);
+  await table.getByRole("separator", { name: "Resize the Project column" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  const after = await columnWidths(table);
+  expect(after[2]).toBe(before[2]! - 24);
+  expect(after[4]).toBe(before[4]! + 24);
+  expect([after[0], after[1], after[3]]).toEqual([before[0], before[1], before[3]]);
+});
+
+const filesTable = (page: Page) => page.locator('table[aria-label="Files"]');
+
+test("a fill column takes the width the others leave at their content's width", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = filesTable(page);
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const wrapper = el.parentElement!;
+        const style = getComputedStyle(wrapper);
+        const inner =
+          wrapper.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        const widths = [...el.tHead!.rows[0]!.cells].map((c) => c.getBoundingClientRect().width);
+        const rows = [...el.tBodies[0]!.rows].filter(
+          (row) => !row.classList.contains("kit-virtual-table__spacer"),
+        );
+        // A column's widest rendered value plus its cells' padding.
+        const content = (column: number) =>
+          Math.max(
+            ...rows.map((row) => {
+              const td = row.cells[column]!;
+              const range = document.createRange();
+              range.selectNodeContents(td);
+              const pad = getComputedStyle(td);
+              return (
+                range.getBoundingClientRect().width +
+                parseFloat(pad.paddingLeft) +
+                parseFloat(pad.paddingRight)
+              );
+            }),
+          );
+        return {
+          fillsBox: Math.abs(el.getBoundingClientRect().width - inner) < 1,
+          othersAtContent: [1, 2, 3].every((i) => Math.abs(widths[i]! - content(i)) < 2),
+          nameTakesRest: widths[0]! > inner / 2,
+        };
+      }),
+    )
+    .toEqual({ fillsBox: true, othersAtContent: true, nameTakesRest: true });
+});
+
+test("narrowing a column widens the fill column, which has no resize handle", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = filesTable(page);
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  await expect(table.getByRole("separator", { name: "Resize the Name column" })).toHaveCount(0);
+  const before = await columnWidths(table);
+  await table.getByRole("separator", { name: "Resize the Kind column" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  const after = await columnWidths(table);
+  expect(after[1]).toBe(before[1]! - 24);
+  expect(after[0]).toBe(before[0]! + 24);
+  expect(after.slice(2)).toEqual(before.slice(2));
+});
+
+test("in a narrow box the fill column stops at its minWidth and the table scrolls sideways", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = filesTable(page);
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  await table.evaluate((el) => {
+    (el.closest(".host") as HTMLElement).style.width = "300px";
+  });
+  await expect
+    .poll(() =>
+      table.evaluate((el) => {
+        const wrapper = el.parentElement!;
+        wrapper.scrollLeft = 50;
+        return {
+          name: Math.round(el.tHead!.rows[0]!.cells[0]!.getBoundingClientRect().width),
+          scrolled: wrapper.scrollLeft > 0,
+        };
+      }),
+    )
+    .toEqual({ name: 160, scrolled: true });
+});
+
+test("moving fill to another column moves the spare width to it", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = filesTable(page);
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  const before = await columnWidths(table);
+  await page.getByRole("checkbox", { name: "Let Kind take the spare width" }).check();
+  await expect(table.getByRole("separator", { name: "Resize the Kind column" })).toHaveCount(0);
+  await expect(table.getByRole("separator", { name: "Resize the Name column" })).toHaveCount(1);
+  // Name gives up the spare width it held and Kind, which was at its
+  // content's width, takes it; Size and Modified keep theirs.
+  await expect
+    .poll(async () => {
+      const after = await columnWidths(table);
+      return {
+        nameNarrower: after[0]! < before[0]!,
+        kindWider: after[1]! > before[1]!,
+        others: after.slice(2),
+      };
+    })
+    .toEqual({ nameNarrower: true, kindWider: true, others: before.slice(2) });
+});
+
+test("the other columns keep their content's width when they fit beside the fill column's minWidth", async ({
+  page,
+}) => {
+  // In a wide box Name starts at its content's width, capped at its
+  // maxWidth, once Kind takes the spare width.
+  await gotoPage(page, "virtual-table");
+  const fill = page.getByRole("checkbox", { name: "Let Kind take the spare width" });
+  let table = filesTable(page);
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  await fill.check();
+  await expect.poll(async () => (await columnWidths(table))[1]! > 300).toBe(true);
+  const wide = await columnWidths(table);
+
+  // A box that leaves Kind 40px beside the other columns at those widths:
+  // more than Kind's 20px minimum, less than its longest word, and far less
+  // than Name's content beyond its maxWidth. A reload starts the page
+  // over; navigating to its own hash would keep Kind filling.
+  await page.reload();
+  table = filesTable(page);
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  // Set the box so the table has `inner` px, and wait for the columns to
+  // fill it. Columns nobody resized are measured again for a new box width,
+  // in whatever face the text now has, so Size and Modified are read after
+  // a first narrowing that leaves every column its content's width.
+  const narrowTo = async (inner: number) => {
+    await table.evaluate((el, width) => {
+      const box = el.closest(".host") as HTMLElement;
+      const wrapper = el.parentElement!;
+      const style = getComputedStyle(wrapper);
+      const now =
+        wrapper.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      box.style.width = `${box.offsetWidth - now + width}px`;
+    }, inner);
+    await expect
+      .poll(async () => (await columnWidths(table)).reduce((a, b) => a + b, 0))
+      .toBeLessThanOrEqual(inner + 2);
+    return columnWidths(table);
+  };
+  const content = await narrowTo(600);
+  await narrowTo(wide[0]! + content[2]! + content[3]! + 40);
+  await fill.check();
+  await expect.poll(async () => (await columnWidths(table))[0]).toBe(wide[0]);
+});
+
+test("a column that stops filling is measured for the box it is in now", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const fill = page.getByRole("checkbox", { name: "Let Kind take the spare width" });
+  const table = filesTable(page);
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  const setInner = (inner: number | undefined) =>
+    table.evaluate((el, width) => {
+      const box = el.closest(".host") as HTMLElement;
+      if (width === undefined) return void box.style.removeProperty("width");
+      const wrapper = el.parentElement!;
+      const style = getComputedStyle(wrapper);
+      const now =
+        wrapper.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      box.style.width = `${box.offsetWidth - now + width}px`;
+    }, inner);
+  const total = async () => (await columnWidths(table)).reduce((a, b) => a + b, 0);
+  // In a narrow box, Name stops filling and takes only its minimum share.
+  await setInner(300);
+  await expect.poll(total).toBeLessThan(600);
+  await fill.check();
+  await expect.poll(async () => (await columnWidths(table))[0]).toBe(160);
+  // Name fills again while the box widens, then gives the spare width back.
+  await fill.uncheck();
+  await setInner(undefined);
+  await expect.poll(total).toBeGreaterThan(600);
+  await fill.check();
+  // Name takes its content's width in the wide box, capped at its 240px
+  // maxWidth, not the share it had in the narrow one.
+  await expect.poll(async () => (await columnWidths(table))[0]).toBe(240);
+});
+
+test("a table whose only column fills keeps that column at its minWidth", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = page.locator('table[aria-label="Paths"]');
+  await table.scrollIntoViewIfNeeded();
+  await expect(dataRows(table).first()).toContainText("docs/guides/");
+  await expect.poll(async () => (await columnWidths(table))[0]).toBe(320);
+});
+
+test("a wide page-scrolled table keeps its full height in a bounded flex column", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = inFlow(page);
+  await expect(table).toHaveAttribute("aria-rowcount", "2001");
+  // Wider than its box, so the wrapper scrolls sideways.
+  await table.evaluate((el) => {
+    el.style.minWidth = "3000px";
+    const flow = el.closest(".flow") as HTMLElement;
+    flow.style.display = "flex";
+    flow.style.flexDirection = "column";
+    flow.style.height = "400px";
+    flow.style.overflowY = "auto";
+  });
+  await expect(table.locator("xpath=..")).toHaveCSS("overflow-x", "auto");
+  await expect
+    .poll(() => table.evaluate((el) => el.parentElement!.clientHeight - el.offsetHeight))
+    .toBeGreaterThanOrEqual(-20);
+});
+
+test("measuring the columns leaves a row's checked radio checked", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = notesTable(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const radio = table.getByRole("radio", { name: "Favorite review #0" });
+  await expect(radio).toBeChecked();
+  await table.getByRole("separator", { name: "Resize the Note column" }).dblclick();
+  await expect(radio).toBeChecked();
+});
+
+test("a narrowed header keeps its label inside its cell", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  await table.getByRole("separator", { name: "Resize the Project column" }).focus();
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press("ArrowLeft");
+  const spill = await table
+    .locator("thead th")
+    .nth(2)
+    .evaluate((th) => {
+      const label = th.querySelector(".kit-th__label")!;
+      return label.getBoundingClientRect().right - th.getBoundingClientRect().right;
+    });
+  expect(spill).toBeLessThanOrEqual(0);
+  await expect
+    .poll(() =>
+      table
+        .locator("thead th")
+        .nth(2)
+        .locator(".kit-th__label")
+        .evaluate((label) => {
+          return label.scrollWidth > label.clientWidth;
+        }),
+    )
+    .toBe(true);
+});
+
+test("a column added while the table is hidden is sized when it appears", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = notesTable(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const host = table.locator("xpath=../..");
+  await host.evaluate((el) => ((el as HTMLElement).style.display = "none"));
+  await page.getByRole("checkbox", { name: "Show the Lines column" }).check();
+  await page.waitForTimeout(200);
+  await host.evaluate((el) => ((el as HTMLElement).style.display = ""));
+  // Measured, not left at the 100px fallback: a short numeric column.
+  await expect
+    .poll(() =>
+      table
+        .locator("thead th")
+        .nth(3)
+        .evaluate((th) => th.getBoundingClientRect().width),
+    )
+    .toBeLessThan(95);
+});
+
+// A new array that keeps the same rows on screen re-renders none of them, so
+// none changes size, yet the old measurements no longer apply. Each kept
+// row is measured again, or the rows above the view count at the estimate
+// once they scroll out of it, and the rows in view jump.
+test("rows a new array keeps on screen are measured again", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Every ID contains "#", so this filter hands the table a new array of the
+  // same rows in the same order.
+  await page.getByRole("searchbox", { name: "Filter reviews" }).fill("#");
+  await page.waitForTimeout(200);
+  const row = table.locator('tbody > tr[aria-rowindex="17"]');
+  const top = () => row.evaluate((tr) => tr.getBoundingClientRect().top);
+  await table.evaluate((el) => (el.parentElement!.style.overflowAnchor = "none"));
+  const before = await top();
+  // Far enough that the tall first row leaves the rendered window.
+  await table.evaluate((el) => (el.parentElement!.scrollTop = 500));
+  await expect(dataRows(table).first()).not.toHaveAttribute("aria-rowindex", "2");
+  expect(Math.abs((await top()) - (before - 500))).toBeLessThan(1);
+});
+
+// Rows are measured in a ResizeObserver callback. Anything there that resized
+// an observed box would leave its report undelivered, which the browser
+// reports as an error on the page.
+test("measuring rows leaves no resize report undelivered", async ({ page }) => {
+  await page.addInitScript(() => {
+    const errors: string[] = [];
+    Object.assign(window, { pageErrors: errors });
+    addEventListener("error", (event) => errors.push(event.message));
+  });
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  await scrollWrapper(table, "middle");
+  await page.waitForTimeout(100);
+  await table.getByRole("button", { name: "ID" }).click();
+  await expect(dataRows(table).first()).toContainText("#");
+  await page.getByRole("searchbox", { name: "Filter reviews" }).fill("#999");
+  await expect(dataRows(table)).toHaveCount(11);
+  await page.getByRole("searchbox", { name: "Filter reviews" }).fill("");
+  await page.getByRole("checkbox", { name: "Show the Branch column" }).uncheck();
+  await table.evaluate((el) => {
+    el.querySelector<HTMLElement>("tbody > tr:not(.kit-virtual-table__spacer)")!.style.height =
+      "300px";
+  });
+  await inFlow(page).scrollIntoViewIfNeeded();
+  await inFlow(page).getByRole("button", { name: "Project" }).click();
+  await page.waitForTimeout(300);
+  expect(
+    await page.evaluate(() => (window as unknown as { pageErrors: string[] }).pageErrors),
+  ).toEqual([]);
+});
+
+// The browser lays out the page once per frame. Reading row positions while
+// Svelte updates the table, before that layout, makes it lay out the whole
+// page early, and again for the frame once anything else changes.
+test("an update reads no layout while it renders the table", async ({
+  page,
+  browser,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "tracing needs the Chrome DevTools Protocol");
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const pageTable = inFlow(page);
+  // The page-scrolled table's top on screen, so the page scrolls nowhere as
+  // its rows change.
+  await pageTable.evaluate((el) => {
+    const scroller = document.querySelector(".content__body")!;
+    scroller.scrollTop +=
+      el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 100;
+  });
+  await page.waitForTimeout(300);
+  const search = page.getByRole("searchbox", { name: "Filter reviews" });
+  const settle = () =>
+    page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+  await browser.startTracing(page, {
+    categories: ["devtools.timeline", "disabled-by-default-devtools.timeline.stack"],
+  });
+  // Every keystroke hands the table a new array; sorting does too.
+  await search.evaluate((input: HTMLInputElement) => {
+    input.value = "#999";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await settle();
+  await pageTable
+    .getByRole("button", { name: "Project" })
+    .evaluate((button: HTMLElement) => button.click());
+  await settle();
+  const trace = JSON.parse((await browser.stopTracing()).toString()) as {
+    traceEvents: {
+      name: string;
+      args?: { beginData?: { stackTrace?: { url: string; functionName: string }[] } };
+    }[];
+  };
+  await expect(dataRows(table)).toHaveCount(11);
+  // A layout started from script carries the script's stack.
+  const forced = trace.traceEvents
+    .filter((event) => event.name === "Layout" || event.name === "UpdateLayoutTree")
+    .flatMap((event) => event.args?.beginData?.stackTrace ?? [])
+    .filter((frame) => frame.url.includes("VirtualTable.svelte"))
+    .map((frame) => frame.functionName);
+  expect(forced).toEqual([]);
+});
+
+test("resize handles announce the translated resizeLabel", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = page.getByTestId("virtual-table-localized");
+  await expect(
+    table.getByRole("separator", { name: "Breite der Spalte Projekt ändern" }),
+  ).toBeAttached();
+  await expect(table.getByRole("separator", { name: /^Resize the/ })).toHaveCount(0);
+});
+
+// Emptying a sized table, narrowing its box, then restoring the rows must
+// end where narrowing a table that kept its rows ends. An empty table has no
+// rows to measure, so the refit waits for them.
+async function setHostWidth(table: Locator, width: string): Promise<void> {
+  await table.evaluate((el, value) => {
+    (el.closest(".host") as HTMLElement).style.width = value;
+  }, width);
+}
+
+const boxFit = (table: Locator) =>
+  table.evaluate((el) => {
+    const wrapper = el.parentElement!;
+    return {
+      table: Math.round(el.getBoundingClientRect().width),
+      box: wrapper.clientWidth,
+      sideways: wrapper.scrollWidth - wrapper.clientWidth,
+    };
+  });
+
+async function filterReviews(page: Page, query: string): Promise<void> {
+  await page.getByRole("searchbox", { name: "Filter reviews" }).fill(query);
+}
+
+// Narrow the box with the rows in place and report the widths that gives,
+// then put the box back.
+async function widthsWhenNarrowedWithRows(table: Locator, width: string): Promise<number[]> {
+  const wide = await columnWidths(table);
+  const wideTable = (await boxFit(table)).table;
+  await setHostWidth(table, width);
+  await expect.poll(async () => (await boxFit(table)).sideways).toBe(0);
+  await expect.poll(() => columnWidths(table)).not.toEqual(wide);
+  const narrow = await columnWidths(table);
+  await setHostWidth(table, "");
+  await expect.poll(async () => (await boxFit(table)).table).toBe(wideTable);
+  return narrow;
+}
+
+test("columns refit to a box narrowed while the table was empty, once rows return", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const wide = await columnWidths(table);
+  const expected = await widthsWhenNarrowedWithRows(table, "420px");
+
+  await filterReviews(page, "no review matches this");
+  await expect(dataRows(table)).toHaveCount(0);
+  await setHostWidth(table, "420px");
+  // With no rows to measure, the header keeps the stored widths.
+  await page.waitForTimeout(100);
+  expect(await columnWidths(table)).toEqual(wide);
+
+  await filterReviews(page, "");
+  await expect(dataRows(table).first()).toContainText("#0");
+  await expect.poll(() => columnWidths(table)).toEqual(expected);
+  const fit = await boxFit(table);
+  expect(fit.sideways, JSON.stringify(fit)).toBe(0);
+  expect(fit.table, JSON.stringify(fit)).toBeLessThanOrEqual(fit.box);
+});
+
+test("a column a person resized keeps its width through an empty, narrowed table", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  // Narrow the Verdict column by keyboard: a person's choice.
+  await table.getByRole("separator", { name: "Resize the Verdict column" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  const chosen = (await columnWidths(table))[1]!;
+  const expected = await widthsWhenNarrowedWithRows(table, "420px");
+  expect(expected[1]).toBe(chosen);
+
+  await filterReviews(page, "no review matches this");
+  await expect(dataRows(table)).toHaveCount(0);
+  await setHostWidth(table, "420px");
+  await page.waitForTimeout(100);
+  await filterReviews(page, "");
+  await expect(dataRows(table).first()).toContainText("#0");
+  await expect.poll(() => columnWidths(table)).toEqual(expected);
+  expect((await columnWidths(table))[1]).toBe(chosen);
+  expect((await boxFit(table)).sideways).toBe(0);
+});
+
+test("a box put back to its old width while the table was empty causes no refit", async ({
+  page,
+}) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const wide = await columnWidths(table);
+  await filterReviews(page, "no review matches this");
+  await expect(dataRows(table)).toHaveCount(0);
+  await setHostWidth(table, "420px");
+  await page.waitForTimeout(100);
+  await setHostWidth(table, "");
+  await page.waitForTimeout(100);
+  expect(await columnWidths(table)).toEqual(wide);
+  // Rows with longer names return: the columns keep their widths, as they
+  // do for any new items at an unchanged table width.
+  await page.getByRole("checkbox", { name: "Use longer project names" }).check();
+  await filterReviews(page, "");
+  await expect(dataRows(table).first()).toContainText("with-a-longer-name");
+  await page.waitForTimeout(100);
+  expect(await columnWidths(table)).toEqual(wide);
+});
+
+test("an empty table's header fills a box widened while it was empty", async ({ page }) => {
+  await gotoPage(page, "virtual-table");
+  const table = bounded(page);
+  await expect(dataRows(table).first()).toContainText("#0");
+  const wide = await columnWidths(table);
+  await setHostWidth(table, "420px");
+  await expect.poll(async () => (await boxFit(table)).table).toBeLessThanOrEqual(420);
+  const narrow = await columnWidths(table);
+
+  await filterReviews(page, "no review matches this");
+  await expect(dataRows(table)).toHaveCount(0);
+  await setHostWidth(table, "");
+  // The stored widths stay, and the last column takes the spare width, so
+  // the header spans the box as it does with rows.
+  await expect
+    .poll(async () => {
+      const fit = await boxFit(table);
+      return fit.box - fit.table;
+    })
+    .toBe(0);
+  expect((await columnWidths(table)).slice(0, -1)).toEqual(narrow.slice(0, -1));
+
+  await filterReviews(page, "");
+  await expect(dataRows(table).first()).toContainText("#0");
+  await expect.poll(() => columnWidths(table)).toEqual(wide);
+});

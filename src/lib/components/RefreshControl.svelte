@@ -7,6 +7,7 @@
     createRefreshScheduler,
     DEFAULT_REFRESH_INTERVAL_MS,
     formatRefreshAge,
+    type RefreshReason,
   } from "../utils/refresh.js";
 
   // Re-evaluate the relative age label this often so it advances without a
@@ -18,8 +19,8 @@
     lastUpdatedAt: number | null;
     /** Spins the icon and disables the button while a refresh is in flight. */
     busy?: boolean;
-    /** Refetches the data; invoked on the interval and on click. */
-    onRefresh: () => void;
+    /** Refetches the data; identifies a button click or an automatic tick. */
+    onRefresh: (reason: RefreshReason) => void;
     /** Accessible name for the button (aria-label). */
     label?: string;
     /** Tooltip text; defaults to `label` when omitted. */
@@ -48,6 +49,10 @@
      * breakdown of the last fetch. Replaces the label's default timestamp
      * `title`, so include the timestamp in the snippet if it still matters. */
     ageTooltip?: Snippet | undefined;
+    /** `sm` sets a smaller, quiet glyph tight against the status text, so a
+     * page toolbar's refresh reads as part of its "Updated ..." label and
+     * not as a second copy of a top-bar Refresh button. */
+    size?: "sm" | "md";
   }
 
   let {
@@ -61,6 +66,7 @@
     locale = undefined,
     ageWidthSamples = undefined,
     ageTooltip = undefined,
+    size = "md",
   }: Props = $props();
 
   const ageReserved = $derived(ageWidthSamples !== undefined && ageWidthSamples.length > 0);
@@ -73,7 +79,7 @@
   // read once at setup (untrack); a live cadence change would need a fresh
   // scheduler.
   const scheduler = createRefreshScheduler(
-    () => onRefresh(),
+    (reason) => onRefresh(reason),
     untrack(() => intervalMs),
   );
 
@@ -103,15 +109,16 @@
   });
 </script>
 
-<div class="kit-refresh-control">
+<div class={["kit-refresh-control", size === "sm" && "kit-refresh-control--sm"]}>
   <IconButton
+    {size}
     class={busy ? "kit-refresh-control__btn querying" : "kit-refresh-control__btn"}
-    onclick={() => scheduler.refreshNow()}
+    onclick={() => scheduler.refreshNow("manual")}
     disabled={busy}
     title={title ?? label}
     ariaLabel={label}
   >
-    <RefreshCwIcon size="14" strokeWidth="2" aria-hidden="true" />
+    <RefreshCwIcon size={size === "sm" ? 12 : 14} strokeWidth="2" aria-hidden="true" />
   </IconButton>
   <div class="kit-refresh-control__status">
     {#if ageTooltip}
@@ -160,6 +167,15 @@
 
   .kit-refresh-control :global(.kit-refresh-control__btn.querying svg) {
     animation: kit-spin 0.8s linear infinite;
+  }
+
+  .kit-refresh-control--sm {
+    min-height: 24px;
+    gap: var(--space-1);
+  }
+
+  .kit-refresh-control--sm :global(.kit-refresh-control__btn) {
+    color: var(--text-muted);
   }
 
   .kit-refresh-control__status {

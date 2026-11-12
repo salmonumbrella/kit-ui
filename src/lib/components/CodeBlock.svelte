@@ -1,6 +1,6 @@
 <script lang="ts">
   import WrapTextIcon from "@lucide/svelte/icons/wrap-text";
-  import { escapeHtml, highlightCode } from "../utils/markdown.js";
+  import { applyShikiStyles, escapeHtml, highlightCode } from "../utils/markdown.js";
   import CopyButton from "./CopyButton.svelte";
   import IconButton from "./IconButton.svelte";
 
@@ -21,6 +21,8 @@
     /** Cap the body height (scrolls beyond), e.g. "320px". */
     maxHeight?: string;
     copyLabel?: string;
+    /** Copy button label and tooltip once the code is copied. */
+    copiedLabel?: string;
     wrapLabel?: string;
     class?: string;
   }
@@ -35,11 +37,18 @@
     copyable = true,
     maxHeight = undefined,
     copyLabel = "Copy code",
+    copiedLabel = "Copied",
     wrapLabel = "Toggle line wrap",
     class: className = "",
   }: Props = $props();
 
   let highlighted = $state<string | null>(null);
+  let body = $state<HTMLDivElement>();
+
+  $effect(() => {
+    void highlighted;
+    if (body) applyShikiStyles(body);
+  });
 
   // Highlight asynchronously (grammar chunks load on demand); the plain
   // escaped fallback renders immediately and on unknown/over-budget code.
@@ -91,12 +100,18 @@
           </IconButton>
         {/if}
         {#if copyable}
-          <CopyButton text={code} ariaLabel={copyLabel} title={copyLabel} />
+          <CopyButton
+            text={code}
+            ariaLabel={copyLabel}
+            title={copyLabel}
+            copiedAriaLabel={copiedLabel}
+            copiedTitle={copiedLabel}
+          />
         {/if}
       </div>
     </div>
   {/if}
-  <div class="kit-code-block__body" style:max-height={maxHeight}>
+  <div bind:this={body} class="kit-code-block__body" style:max-height={maxHeight}>
     {@html highlighted ?? plainHtml}
   </div>
 </div>

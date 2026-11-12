@@ -18,28 +18,86 @@ document.documentElement.classList.toggle("dark", prefersDark);
 
 ## Tokens
 
-| Group       | Variables                                                                                               |
-| ----------- | ------------------------------------------------------------------------------------------------------- |
-| Backgrounds | `--bg-primary`, `--bg-surface`, `--bg-surface-hover`, `--bg-inset`                                      |
-| Borders     | `--border-default`, `--border-muted`                                                                    |
-| Text        | `--text-primary`, `--text-secondary`, `--text-muted`                                                    |
-| Accents     | `--accent-blue`, `--accent-amber`, `--accent-purple`, `--accent-green`, `--accent-red`, `--accent-teal` |
-| Status      | `--status-waiting` (StatusDot "your turn" bubble)                                                       |
-| Shadows     | `--shadow-sm`, `--shadow-md`, `--shadow-lg`, `--overlay-bg`                                             |
-| Spacing     | `--space-1` … `--space-8` (see Spacing)                                                                 |
-| Radii       | `--radius-sm` (4px), `--radius-md` (6px), `--radius-lg` (8px)                                           |
-| Fonts       | `--font-sans`, `--font-mono`                                                                            |
-| Font sizes  | `--font-size-2xs` … `--font-size-2xl` (rem — see Typography), `--font-size-root`                        |
-| Chrome      | `--header-height` (44px), `--status-bar-height` (24px), `--split-handle-size` (4px, read-only in apps)  |
+| Group       | Variables                                                                                                                                                                                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backgrounds | `--bg-primary`, `--bg-surface`, `--bg-surface-hover`, `--bg-inset`                                                                                                                       |
+| Borders     | `--border-default`, `--border-muted`                                                                                                                                                     |
+| Text        | `--text-primary`, `--text-secondary`, `--text-muted`                                                                                                                                     |
+| Accents     | `--accent-blue`, `--accent-amber`, `--accent-purple`, `--accent-green`, `--accent-red`, `--accent-teal`, `--accent-orange`                                                               |
+| Status      | `--status-waiting` (StatusDot "your turn" bubble)                                                                                                                                        |
+| Shadows     | `--shadow-sm`, `--shadow-md`, `--shadow-lg`, `--overlay-bg`                                                                                                                              |
+| Cards       | `--card-border` (the default Card edge: midway between `--border-muted` and `--border-default` in light, `--border-muted` in dark)                                                       |
+| Popovers    | `--bg-popover`, `--border-popover` (the `.kit-popover-card` and Modal surface and edge; lighter than the surface in dark), `--text-muted-popover` (dark only: the muted ink inside them) |
+| Spacing     | `--space-1` … `--space-8` (see Spacing)                                                                                                                                                  |
+| Radii       | `--radius-sm` (4px), `--radius-md` (6px), `--radius-lg` (8px)                                                                                                                            |
+| Fonts       | `--font-sans`, `--font-mono`                                                                                                                                                             |
+| Font sizes  | `--font-size-2xs` … `--font-size-2xl` (rem — see Typography), `--font-size-root`                                                                                                         |
+| Chrome      | `--header-height` (44px), `--status-bar-height` (24px), `--split-handle-size` (4px, read-only in apps)                                                                                   |
+| Selection   | `--selected-strong-bg`, `--selected-strong-edge`, `--selected-strong-weight`, `--selected-bg`, `--selected-edge`, `--selected-list-bg` (see Selected state)                              |
 
 Semantic accent usage: blue = info/primary, green = success, red = danger,
-amber = warning, purple = merged/workflow, teal = workspace.
+amber = warning, orange = a warning that is not a failure (StatusDot
+`unclean`), purple = merged/workflow, teal = workspace. `--accent-orange`
+defaults to a mix of the theme's amber and red; set it to pin a color.
+
+Disabled controls read `--disabled-ink` and `--disabled-edge`. A disabled
+solid button keeps a faint fill and edge in its tone at full opacity, with
+`--disabled-ink` label text.
 
 One deliberate exception to "tokens only": pure `#000`/`#fff` **inside
 `color-mix()`** are permitted as shade math (darken-on-hover, derive an ink
 from an accent) — they are arithmetic constants, not palette entries, and the
 `raw-color` checker rule allows them. Standalone hex palette colors are still
 off-limits outside `theme.css`.
+
+## Selected state
+
+One idiom marks the chosen option of a choice group: a raised pill. The
+`--selected-strong-*` tokens draw it. SegmentedControl (including
+DateRangePicker's mode tabs) and TopBar tabs use them, and apps reuse them for their own choice
+groups (chart toggles, sort pickers) so selection looks the same
+everywhere. In light the pill is the white surface lifted off the grey track
+by a hairline and a soft shadow. In dark it is a lighter fill with a faint
+edge, because the plain dark surface barely differs from the dark track.
+Selected text is primary ink at `--selected-strong-weight`. Themes that set
+`--shadow-raised` keep their own edge on the pill.
+
+The quieter `--selected-bg` / `--selected-edge` pair marks a chosen control
+without lifting it, and `--selected-list-bg` fills the current row of a list
+that already sits on the surface (the SettingsLayout nav).
+
+## Icons
+
+theme.css draws every lucide icon with the same 1.2px line at any rendered
+size, including a size set in CSS. The stroke does not scale with the icon
+(`vector-effect: non-scaling-stroke` on the icon's shapes), so there is no
+list of supported sizes.
+
+**`strokeWidth` has no effect in the default theme.** Whatever a call site
+passes, the icon draws the 1.2px line. The one exception is
+`strokeWidth={0}`, which marks a filled icon: it stays unstroked.
+
+The overflow icons (`ellipsis`, `ellipsis-vertical`) take a 1.6px stroke, so
+their dots match the weight of the glyphs beside them. A dot's diameter is
+the icon size / 12 plus 1.6px.
+
+The rules sit at the lowest specificity. An identity theme's `--icon-stroke`
+wins and is measured in lucide's 24-unit box, so under an identity theme the
+line scales with the icon. An app rule also wins; to set a stroke in viewBox
+units, it must turn the fixed line off on the shapes as well:
+
+```css
+.my-icon svg.lucide {
+  stroke-width: 2;
+}
+.my-icon svg.lucide > * {
+  vector-effect: none;
+}
+```
+
+Size icons by context: 12px in chips, pills, and dense rows; 14px in
+toolbars, menus, and icon buttons; 16px in the top bar; 24px for empty
+states.
 
 ## Typography
 
@@ -146,21 +204,28 @@ the rest are **fallback-only**: never declared by the default pair, read as
 `var(--token, <site default>)` so the default theme stays pixel-identical
 and each call site keeps its own tuned default until a theme opts in.
 
-| Token                                          | Default                      | Used for                                                                                                                                           |
-| ---------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--border-width`                               | `1px` (declared)             | full-box control/surface borders (single-edge dividers stay 1px)                                                                                   |
-| `--press-transform`                            | `translateY(1px)` (declared) | `:active` on controls carrying `kit-control-states`                                                                                                |
-| `--font-weight-medium/semibold/bold`           | `500/600/700` (declared)     | every library font-weight                                                                                                                          |
-| `--transition-ease`                            | `ease` (fallback)            | hover/press easing everywhere `--transition-fast` is used                                                                                          |
-| `--transition-medium`                          | per site (fallback)          | longer motion: DetailDrawer slide-in (`0.18s`)                                                                                                     |
-| `--letter-spacing-label`                       | per site (fallback)          | uppercase label/eyebrow tracking                                                                                                                   |
-| `--label-transform`                            | `uppercase` (fallback)       | label/eyebrow letter case (Chip, Card eyebrow, section and group labels); `none` renders sentence case                                             |
-| `--color-label-fill` / `--color-label-ink-mix` | `100%` (fallback)            | ColorLabel solid vs tinted pill (see [ColorLabel](components/color-label.md#theming))                                                              |
-| `--line-height-prose`                          | `1.6` (fallback)             | comment/markdown body leading                                                                                                                      |
-| `--icon-stroke`                                | `2` (fallback)               | lucide `stroke-width`, applied by a `themes.css` rule under `[data-kit-theme]` only                                                                |
-| `--radius-dot`                                 | `50%` (fallback)             | the small indicator dots (StatusDot, Chip/FilterDropdown dots, Timeline dots) and the Toggle knob — square pixels in the print/teletype identities |
-| `--radius-toggle`                              | `999px` (fallback)           | the Toggle track — pill by default, square in terminal/zine, 2px in graphite                                                                       |
-| `--overlay-filter`                             | `none` (fallback)            | `backdrop-filter` on Modal / drawer / lightbox / palette scrims                                                                                    |
+| Token                                          | Default                                                                            | Used for                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--border-width`                               | `1px` (declared)                                                                   | full-box control/surface borders (single-edge dividers stay 1px)                                                                                                                                                                                                                                                                      |
+| `--press-transform`                            | `translateY(1px)` (declared)                                                       | `:active` on controls carrying `kit-control-states`                                                                                                                                                                                                                                                                                   |
+| `--font-weight-medium/semibold/bold`           | `500/600/700` (declared)                                                           | every library font-weight                                                                                                                                                                                                                                                                                                             |
+| `--transition-ease`                            | `ease` (fallback)                                                                  | hover/press easing everywhere `--transition-fast` is used                                                                                                                                                                                                                                                                             |
+| `--transition-medium`                          | per site (fallback)                                                                | longer motion: DetailDrawer slide-in (`0.18s`)                                                                                                                                                                                                                                                                                        |
+| `--letter-spacing-label`                       | per site (fallback)                                                                | uppercase label/eyebrow tracking                                                                                                                                                                                                                                                                                                      |
+| `--label-transform`                            | `uppercase` (fallback)                                                             | label/eyebrow letter case (Chip, Card eyebrow, section and group labels); `none` renders sentence case                                                                                                                                                                                                                                |
+| `--color-label-fill` / `--color-label-ink-mix` | `100%` (fallback)                                                                  | ColorLabel solid vs tinted pill (see [ColorLabel](components/color-label.md#theming))                                                                                                                                                                                                                                                 |
+| `--line-height-prose`                          | `1.6` (fallback)                                                                   | comment/markdown body leading                                                                                                                                                                                                                                                                                                         |
+| `--icon-stroke`                                | `2` (fallback)                                                                     | lucide `stroke-width`, applied by a `themes.css` rule under `[data-kit-theme]` only; the default pair picks the stroke per icon size instead (see Icons)                                                                                                                                                                              |
+| `--radius-dot`                                 | `50%` (fallback)                                                                   | the small indicator dots (StatusDot, Chip/FilterDropdown dots, Timeline dots) and the Toggle knob — square pixels in the print/teletype identities                                                                                                                                                                                    |
+| `--radius-toggle`                              | `999px` (fallback)                                                                 | the Toggle track — pill by default, square in terminal/zine, 2px in graphite                                                                                                                                                                                                                                                          |
+| `--overlay-filter`                             | `none` (fallback)                                                                  | `backdrop-filter` on Modal / drawer / lightbox / palette scrims                                                                                                                                                                                                                                                                       |
+| `--edge-highlight`                             | `transparent` (declared)                                                           | top-edge highlight inside a theme's own `--shadow-raised` and `--shadow-panel`; declared because an unset reference there would void the whole composite; no component reads it directly, so set it in both modes                                                                                                                     |
+| `--shadow-raised`                              | `none` (fallback; the active SegmentedControl segment falls back to `--shadow-sm`) | controls that stand up: Button and ProviderButton, IconButton, CopyButton, FilterDropdown and SelectDropdown triggers, MenuTrigger, the Typeahead trigger, the active SegmentedControl segment (except borderless), a scrolled sticky Table header, AppSidebar                                                                        |
+| `--shadow-raised-solid`                        | `--shadow-raised` (fallback)                                                       | solid Buttons in place of `--shadow-raised`, such as a softer top highlight that does not read as a bright line on a saturated fill; pressed or open, they still take `--shadow-sunken`                                                                                                                                               |
+| `--bg-raised`                                  | `--bg-inset` (fallback)                                                            | resting fill of raised controls that otherwise fill with `--bg-inset`: neutral and danger outline Buttons, neutral soft Buttons, the SSO ProviderButton, FilterDropdown, SelectDropdown and Typeahead triggers, MenuTrigger, and AdaptiveActionGrid icon buttons; pressed or open controls keep `--bg-inset`                          |
+| `--shadow-sunken`                              | `none` (fallback)                                                                  | fields and pressed or open controls: TextInput and SearchInput, MentionTextarea (except embedded), the open Typeahead input, the SegmentedControl track (except borderless), pressed buttons and triggers, toggled IconButtons (`aria-pressed`), and open Button, IconButton, FilterDropdown, SelectDropdown and MenuTrigger triggers |
+| `--shadow-panel`                               | per site (fallback)                                                                | panels: Card `raised` and MetricCard (`--shadow-sm`; MetricCard only at `level="raised"`, its default), the Table scroll wrapper (`none`)                                                                                                                                                                                             |
+| `--bg-table-header`                            | `--bg-inset` (fallback)                                                            | TableHeaderCell background, such as a lit gradient                                                                                                                                                                                                                                                                                    |
 
 **Focus**: every interactive element shows
 `outline: var(--focus-ring)` on `:focus-visible` (offset 1px outside, or
@@ -203,10 +268,30 @@ custom active transforms rather than rejecting native buttons.
 **Popover chrome**: every transient floating surface (dropdown menus,
 typeahead lists, filter panels, the range-picker panel, tooltips, toasts,
 FindBar) uses the same card, shipped as the **`.kit-popover-card`** class
-in theme.css: `border: 1px solid var(--border-default); border-radius:
+in theme.css: `border: 1px solid var(--border-popover); border-radius:
 var(--radius-md); box-shadow: var(--shadow-lg); background:
-var(--bg-surface)`. Reuse the class for custom popovers — `kit-ui-check`
+var(--bg-popover)`. Reuse the class for custom popovers — `kit-ui-check`
 flags a hand-written copy of the recipe (`hand-rolled-popover-card`).
+
+In dark, the card also redefines `--bg-surface-hover` for everything inside
+it: 8% of `--text-primary` over `--bg-popover`. The page's hover fill is
+darker than the popover surface, so without this a hovered row would read as
+a dent. `--selected-bg` and `--selected-list-bg` follow the same fill.
+`--bg-inset` is unchanged, so a well inside a popover is still darker than
+the popover. Content in a custom popover gets this from the class; do not
+hard-code a hover color there.
+
+The dark card redefines `--text-muted` too, to `--text-muted-popover`: the
+theme's muted ink mixed 25% toward `--text-primary`. Muted ink is tuned for
+the page surface, and on a hovered row in the lighter popover it fell to
+3.7:1. With the mix, muted text has about the contrast it has on the page
+while a row rests, and at least 4.5:1 on the hover fill. A theme that wants
+a different muted ink in popovers sets `--text-muted-popover` in its
+`:root.dark` block.
+
+The Modal panel is the same kind of surface. It keeps its own radius, takes
+`--bg-popover` and `--border-popover`, and gets the same dark hover fill and
+muted ink.
 
 **Stacking**: three z tokens in theme.css order the layers —
 `--z-popover` (1000, trigger-anchored fixed popovers), `--z-overlay`
@@ -214,7 +299,8 @@ flags a hand-written copy of the recipe (`hand-rolled-popover-card`).
 inside an overlay are later siblings in its stacking context, so equal z
 suffices), `--z-tooltip` (1100, above everything). Use the tokens rather
 than raw numbers so an app that must slot its own chrome between layers
-can retune them in one place.
+can retune them in one place; `AppSidebar` and its narrow bar sit one below
+`--z-overlay`, so overlays stay above them after a retune.
 
 **Escape layering**: Escape closes one layer per press. Popover dismissal
 (`dismissable`) and search-field clearing claim the key with
@@ -406,17 +492,17 @@ setThemeName(null); // back to the default pair
 `KIT_THEMES` exports metadata (`name`, `label`, `description`) for building a
 picker. The nine built-in identities:
 
-| Name           | Identity                                                                                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `control-room` | Mission console: dense cool steel, signal cyan, 0.08s feedback, machined radii, DIN lettering (Bahnschrift / Avenir Next)                                                             |
-| `terminal`     | Quiet teletype: mono type, zero radius, flat borders-only elevation, `steps(1)` no-tween state changes, no press travel, phosphor mint dark / ink-on-paper light                      |
-| `zine`         | Risograph poster: 2px ink borders, hard offset shadows, presses shove the card into its shadow (`translate(2px, 2px)`), poster weights (600/700/800), square corners, plain Helvetica |
-| `pebble`       | Soft clay: 10–20px radii, near-invisible borders, large diffuse shadows, halo focus, ease-out-expo squish press, frosted overlays, rounded face                                       |
-| `gallery`      | Exhibition catalogue: old-style serif UI (Iowan / Palatino), paper neutrals, hairline 1.5 icon strokes, book leading, ink navy                                                        |
-| `arctic`       | Glacier light: airy, near-borderless, tonal depth, generous radii, long decelerating glide, heavy overlay frost, geometric type (Avenir / Century Gothic)                             |
-| `ember`        | Last light: warm peach neutrals, burnt-orange primary, sun-tinted shadows, humanist type (Seravek / Trebuchet), pointer-tracking warm glow on buttons                                 |
-| `graphite`     | Machined steel: 0.5px hairline borders, tight 2–4px radii, linear 0.06s response, no press travel, safety orange; deliberately keeps the base Inter                                   |
-| `quiet`        | Calm workspace: platform system type, neutral surfaces, one blue accent, sentence-case labels (`--label-transform: none`), AA muted text on both surfaces, no canvas decor            |
+| Name           | Identity                                                                                                                                                                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `control-room` | Mission console: dense cool steel, signal cyan, 0.08s feedback, machined radii, DIN lettering (Bahnschrift / Avenir Next)                                                                                                                                                                     |
+| `terminal`     | Quiet teletype: mono type, zero radius, flat borders-only elevation, `steps(1)` no-tween state changes, no press travel, phosphor mint dark / ink-on-paper light                                                                                                                              |
+| `zine`         | Risograph poster: 2px ink borders, hard offset shadows, presses shove the card into its shadow (`translate(2px, 2px)`), poster weights (600/700/800), square corners, plain Helvetica                                                                                                         |
+| `pebble`       | Soft clay: 10–20px radii, near-invisible borders, large diffuse shadows, halo focus, ease-out-expo squish press, frosted overlays, rounded face                                                                                                                                               |
+| `gallery`      | Exhibition catalogue: old-style serif UI (Iowan / Palatino), paper neutrals, hairline 1.5 icon strokes, book leading, ink navy                                                                                                                                                                |
+| `arctic`       | Glacier light: airy, near-borderless, tonal depth, generous radii, long decelerating glide, heavy overlay frost, geometric type (Avenir / Century Gothic)                                                                                                                                     |
+| `ember`        | Last light: warm peach neutrals, burnt-orange primary, sun-tinted shadows, humanist type (Seravek / Trebuchet), pointer-tracking warm glow on buttons                                                                                                                                         |
+| `graphite`     | Machined steel: 0.5px hairline borders, tight 2–4px radii, linear 0.06s response, no press travel, safety orange; deliberately keeps the base Inter                                                                                                                                           |
+| `quiet`        | Calm workspace: platform system type, neutral surfaces layered inset < page < surface, one blue accent, sentence-case labels (`--label-transform: none`), depth tokens on (raised controls, sunken fields, ringed panels, lit table headers), AA muted text on every surface, no canvas decor |
 
 ### Canvas decor
 
@@ -481,6 +567,26 @@ Italics are synthesized and non-latin scripts fall through to the platform
 fallbacks in each stack. Licenses: `src/lib/fonts/OFL.txt`. Apps with their
 own font pipeline can skip the file and self-host any of these families.
 
+To keep text from painting in a fallback face before a font arrives, embed
+the faces in the app's render-blocking stylesheet and hold the first paint
+until they load. With Vite or SvelteKit, inline the font files as data URLs:
+
+```js
+build: {
+  assetsInlineLimit: (file) => (file.endsWith(".woff2") ? true : undefined),
+},
+```
+
+Then inline
+[`hold-first-paint.js`](https://github.com/kenn-io/actions/blob/main/first-paint/hold-first-paint.js)
+in each page's `<head>`, directly after `<meta charset>` and before any
+stylesheet; a `script-src` Content Security Policy needs its hash. Embedding
+puts every face `fonts.css` declares into that stylesheet (about 390KB as
+base64), so an app that offers no theme pack can declare only Inter and
+JetBrains Mono from `@kenn-io/kit-ui/fonts/*` instead. The demo
+gallery does both (`vite.config.ts`), and CI runs the kenn-io/actions
+`first-paint` check against its build.
+
 ### Authoring a custom theme
 
 `setThemeName` accepts any string, so apps can define their own themes with
@@ -510,6 +616,39 @@ Two cascade rules to respect (see the comment atop `themes.css`):
   winning: `themes.css` re-asserts the `high-contrast` values above any
   `data-kit-theme` — a custom theme file should copy those two blocks (or
   simply be imported before `themes.css`).
+
+Depth is optional. The seven depth tokens (`--edge-highlight`,
+`--shadow-raised`, `--shadow-raised-solid`, `--shadow-sunken`, `--shadow-panel`,
+`--bg-table-header`, `--bg-raised`) have no effect until a theme sets them, so
+components keep today's look. A theme that sets them can declare the composites
+once in its light block, because each `var()` inside them resolves against the
+root's current palette:
+
+```css
+:root[data-kit-theme="acme"] {
+  --edge-highlight: #ffffff;
+  --shadow-raised: inset 0 1px var(--edge-highlight), var(--shadow-sm);
+  --shadow-raised-solid:
+    inset 0 1px color-mix(in srgb, var(--edge-highlight) 25%, transparent), var(--shadow-sm);
+  --shadow-sunken: inset var(--shadow-sm);
+  --shadow-panel: 0 0 0 1px var(--border-muted), var(--shadow-raised);
+  --bg-table-header: linear-gradient(var(--bg-surface), var(--bg-inset));
+}
+
+:root.dark[data-kit-theme="acme"] {
+  --edge-highlight: rgba(255, 255, 255, 0.06);
+  --bg-raised: var(--bg-surface-hover);
+}
+```
+
+Solid Buttons take `--shadow-raised-solid`, or `--shadow-raised` when it is
+unset. A bright highlight that suits a pale control reads as a hard line on a
+saturated fill, so the example softens it to a quarter there.
+
+Set `--bg-raised` where the inset well is darker than the page, as in most dark
+palettes. Raised controls that would fill with `--bg-inset` then fill lighter
+than the surface they sit on, instead of reading as wells. Fields, pressed or
+open controls and other sunken surfaces keep `--bg-inset`.
 
 Solid buttons render `--bg-surface` as their text color, so keep light-mode
 accents deep enough for near-white text (≥ 4.5:1) and dark-mode accents

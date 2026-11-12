@@ -19,6 +19,17 @@ in place. `resolveRange()` turns any selection into concrete inclusive
 `{from, to}` bounds (local-timezone `YYYY-MM-DD` strings). Escape and outside
 clicks dismiss the popover.
 
+The mode tabs (Relative / Calendar / Custom) are a normal SegmentedControl.
+The chosen mode's options (7d … All, or Day / Week / Month) are a lower tier
+tucked under the tabs: flush with their bottom edge, square on top and
+rounded below, inset 20px so the tabs overhang it on both sides. A contact
+line runs along its top over a quiet hairline ring, and its fill is a step
+quieter than the tabs' track. The options are shorter and in smaller type
+than the mode tabs, so the chosen preset can use the same selected pill and
+still read as the lesser choice. The option height (17px) is a floor: when
+the touch type scale and a larger browser font make a label taller, the
+option and the tier grow to fit it.
+
 **Mid-pick draft lifecycle**: between the two custom clicks the incomplete
 range is internal UI state — it is never emitted through `onSelect`. The
 draft survives switching tabs and dismissing/reopening the popover, so an
@@ -111,3 +122,11 @@ interface RangePreset {
 | `todayStr()` / `daysAgo(n)` / `localDateStr(d)` | Local `YYYY-MM-DD` helpers                           |
 | `allFromDate(earliestDate?)`                    | "All" lower bound (falls back to one year)           |
 | `DEFAULT_RANGE_PRESETS`                         | 7d / 30d / 90d / 1y / All                            |
+
+### First day of the week
+
+Set `weekStart="sunday"` for Sunday–Saturday weeks; the default is `"monday"`.
+This controls the calendar columns, highlighted week, and trigger label. Pass
+the same value to `resolveRange(selection, earliestDate, weekStart)` when
+resolving a selection. `Calendar` also accepts `weekStart`; `periodBounds` and
+`monthGridDates` take it as their last argument, as does `weekdayLabels`.

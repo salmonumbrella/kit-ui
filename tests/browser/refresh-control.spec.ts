@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { gotoPage } from "./helpers.js";
+import { gotoPage, resolvedStyle } from "./helpers.js";
 
 // Width reservation only exists under real layout: the box must measure the
 // same across every variant while the visible text inside it does not.
@@ -34,6 +34,18 @@ function fixedWidthControl(page: Page) {
     marker: page.getByTestId("fixed-width-marker"),
   };
 }
+
+test("onRefresh receives manual clicks and automatic ticks", async ({ page }) => {
+  await page.clock.install({ time: new Date("2026-01-15T08:00:00Z") });
+  await gotoPage(page, "refresh-control");
+  await page.clock.pauseAt(new Date("2026-01-15T08:01:00Z"));
+  const reason = page.getByTestId("refresh-reason");
+
+  await page.getByRole("button", { name: "Refresh usage data", exact: true }).click();
+  await expect(reason).toHaveText("manual");
+  await page.clock.fastForward(300_000);
+  await expect(reason).toHaveText("auto");
+});
 
 test("age box keeps one width across the narrowest, widest, and overlong labels", async ({
   page,
@@ -92,4 +104,14 @@ test("age label opens its tooltip on hover and keeps the reserved layout", async
 
   await page.mouse.move(0, 0);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("the small size sets a quiet glyph tight against the status", async ({ page }) => {
+  await gotoPage(page, "refresh-control");
+  const control = page.getByTestId("refresh-control-sm").locator(".kit-refresh-control");
+  const button = control.locator(".kit-refresh-control__btn");
+  await expect(button).toHaveCSS("width", "24px");
+  await expect(button.locator("svg")).toHaveAttribute("width", "12");
+  await expect(control).toHaveCSS("column-gap", "2px");
+  await expect(button).toHaveCSS("color", await resolvedStyle(page, "color", "var(--text-muted)"));
 });

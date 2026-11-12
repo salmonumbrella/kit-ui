@@ -8,6 +8,11 @@ interval is armed at mount without an immediate fetch, a manual click refreshes
 now and resets the timer, and the age label ticks forward once a minute without
 refetching.
 
+`onRefresh` receives `"manual"` for a button click and `"auto"` for an interval
+tick. Use the reason when automatic refreshes need a different policy, such as
+waiting for pending edits. Callbacks that ignore the argument still work.
+Import `RefreshReason` to annotate handlers with the shared reason type.
+
 ```svelte
 <script lang="ts">
   import { RefreshControl } from "@kenn-io/kit-ui";
@@ -28,17 +33,18 @@ refetching.
 
 ## Props
 
-| Prop              | Type                                                     | Default            | Notes                                                 |
-| ----------------- | -------------------------------------------------------- | ------------------ | ----------------------------------------------------- |
-| `lastUpdatedAt`   | `number \| null`                                         | required           | Epoch ms of last successful fetch                     |
-| `onRefresh`       | `() => void`                                             | required           | Called on click and on the interval                   |
-| `busy`            | `boolean`                                                | `false`            | Spins the icon, disables the button                   |
-| `label`           | `string`                                                 | `"Refresh"`        | aria-label                                            |
-| `title`           | `string`                                                 | `label`            | Tooltip                                               |
-| `intervalMs`      | `number`                                                 | `300000` (5 min)   | Read once at mount                                    |
-| `formatAge`       | `(lastUpdatedAt: number \| null, now: number) => string` | `formatRefreshAge` | Renders the age label; see below                      |
-| `locale`          | `string`                                                 | browser locale     | BCP 47 tag for the timestamp tooltip on the age label |
-| `ageWidthSamples` | `readonly string[]`                                      | content width      | Reserves the age box width; see below                 |
+| Prop              | Type                                                     | Default            | Notes                                                                                  |
+| ----------------- | -------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------- |
+| `lastUpdatedAt`   | `number \| null`                                         | required           | Epoch ms of last successful fetch                                                      |
+| `onRefresh`       | `(reason: RefreshReason) => void`                        | required           | Click passes `"manual"`; interval passes `"auto"`                                      |
+| `busy`            | `boolean`                                                | `false`            | Spins the icon, disables the button                                                    |
+| `label`           | `string`                                                 | `"Refresh"`        | aria-label                                                                             |
+| `title`           | `string`                                                 | `label`            | Tooltip                                                                                |
+| `intervalMs`      | `number`                                                 | `300000` (5 min)   | Read once at mount                                                                     |
+| `formatAge`       | `(lastUpdatedAt: number \| null, now: number) => string` | `formatRefreshAge` | Renders the age label; see below                                                       |
+| `locale`          | `string`                                                 | browser locale     | BCP 47 tag for the timestamp tooltip on the age label                                  |
+| `ageWidthSamples` | `readonly string[]`                                      | content width      | Reserves the age box width; see below                                                  |
+| `size`            | `"sm" \| "md"`                                           | `"md"`             | `sm`: a 24px button with a 12px muted glyph set 2px from the status, for page toolbars |
 
 ## Localization
 

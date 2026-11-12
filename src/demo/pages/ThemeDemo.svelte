@@ -1,7 +1,23 @@
 <script lang="ts">
   import { MediaQuery } from "svelte/reactivity";
-  import { BREAKPOINTS, MEDIA } from "../../lib/index.js";
+  import { BREAKPOINTS, MEDIA, Table, TableHeaderCell } from "../../lib/index.js";
+  import CheckIcon from "@lucide/svelte/icons/check";
+  import EllipsisIcon from "@lucide/svelte/icons/ellipsis";
+  import InboxIcon from "@lucide/svelte/icons/inbox";
+  import CircleIcon from "@lucide/svelte/icons/circle";
+  import SettingsIcon from "@lucide/svelte/icons/settings";
   import DemoSection from "../DemoSection.svelte";
+
+  // Sizes by where each is used, a size between the usual steps, and an
+  // icon whose rendered size comes from CSS instead of its size prop.
+  const iconSizes: { size: number; rendered?: number; use: string }[] = [
+    { size: 12, use: "chips, pills, dense rows" },
+    { size: 14, use: "toolbars, menus, icon buttons" },
+    { size: 15, use: "any size between the steps" },
+    { size: 16, use: "top bar" },
+    { size: 24, use: "empty states" },
+    { size: 24, rendered: 18, use: "resized in CSS" },
+  ];
 
   const compact = new MediaQuery(MEDIA.compact);
   const medium = new MediaQuery(MEDIA.medium);
@@ -68,33 +84,35 @@ const compact = new MediaQuery(MEDIA.compact); // compact.current is reactive
 /* in CSS */
 @media (max-width: 640px) { … }`}
 >
-  <table class="bp-table">
-    <thead>
-      <tr><th>name</th><th>query</th><th>matches now</th></tr>
-    </thead>
-    <tbody>
-      <tr
-        ><td><code>compact</code></td><td><code>≤ {BREAKPOINTS.compact}px</code></td><td
-          >{compact.current ? "✓" : "—"}</td
-        ></tr
-      >
-      <tr
-        ><td><code>medium</code></td><td><code>≤ {BREAKPOINTS.medium}px</code></td><td
-          >{medium.current ? "✓" : "—"}</td
-        ></tr
-      >
-      <tr
-        ><td><code>wide</code></td><td><code>≤ {BREAKPOINTS.wide}px</code></td><td
-          >{wide.current ? "✓" : "—"}</td
-        ></tr
-      >
-      <tr
-        ><td><code>touch</code></td><td><code>{MEDIA.touch}</code></td><td
-          >{touch.current ? "✓" : "—"}</td
-        ></tr
-      >
-    </tbody>
-  </table>
+  <div class="bp-table">
+    <Table ariaLabel="Breakpoints" unsorted zebra={false}>
+      {#snippet header()}
+        <TableHeaderCell label="name" />
+        <TableHeaderCell label="query" />
+        <TableHeaderCell label="matches now" />
+      {/snippet}
+      <tr>
+        <td><code>compact</code></td>
+        <td><code>≤ {BREAKPOINTS.compact}px</code></td>
+        <td>{compact.current ? "✓" : "—"}</td>
+      </tr>
+      <tr>
+        <td><code>medium</code></td>
+        <td><code>≤ {BREAKPOINTS.medium}px</code></td>
+        <td>{medium.current ? "✓" : "—"}</td>
+      </tr>
+      <tr>
+        <td><code>wide</code></td>
+        <td><code>≤ {BREAKPOINTS.wide}px</code></td>
+        <td>{wide.current ? "✓" : "—"}</td>
+      </tr>
+      <tr>
+        <td><code>touch</code></td>
+        <td><code>{MEDIA.touch}</code></td>
+        <td>{touch.current ? "✓" : "—"}</td>
+      </tr>
+    </Table>
+  </div>
 </DemoSection>
 
 <DemoSection
@@ -113,23 +131,36 @@ const compact = new MediaQuery(MEDIA.compact); // compact.current is reactive
   </div>
 </DemoSection>
 
+<DemoSection
+  title="Icon line weight"
+  description="Every icon draws a 1.2px line at any size, including a size set in CSS. strokeWidth has no effect in the default theme. Identity themes set --icon-stroke, which scales with the icon."
+  code={`<SettingsIcon size="14" aria-hidden="true" />
+<SettingsIcon size="24" aria-hidden="true" />  /* same 1.2px line */
+<StarIcon size="14" strokeWidth={0} fill="currentColor" />  /* filled mark, no stroke */`}
+>
+  <div class="icon-weights" data-testid="icon-weights">
+    {#each iconSizes as row (`${row.size}-${row.rendered ?? row.size}`)}
+      {@const style = row.rendered
+        ? `width: ${row.rendered}px; height: ${row.rendered}px`
+        : undefined}
+      <div class="icon-weight-row" data-icon-size={row.rendered ?? row.size}>
+        <span class="icon-weight-glyphs" style:color="var(--text-primary)">
+          <SettingsIcon size={row.size} strokeWidth={2} {style} aria-hidden="true" />
+          <CheckIcon size={row.size} strokeWidth={2} {style} aria-hidden="true" />
+          <InboxIcon size={row.size} strokeWidth={2} {style} aria-hidden="true" />
+          <CircleIcon size={row.size} strokeWidth={2} {style} aria-hidden="true" />
+          <EllipsisIcon size={row.size} strokeWidth={2} {style} aria-hidden="true" />
+        </span>
+        <code>{row.rendered ? `${row.size}px → ${row.rendered}px` : `${row.size}px`}</code>
+        <span class="type-values">{row.use}</span>
+      </div>
+    {/each}
+  </div>
+</DemoSection>
+
 <style>
   .bp-table {
-    border-collapse: collapse;
-    font-size: var(--font-size-sm);
-  }
-
-  .bp-table th,
-  .bp-table td {
-    text-align: left;
-    padding: 4px 16px 4px 0;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--border-muted);
-  }
-
-  .bp-table th {
-    color: var(--text-muted);
-    font-weight: 600;
+    display: flex;
   }
 
   .type-scale {
@@ -143,6 +174,32 @@ const compact = new MediaQuery(MEDIA.compact); // compact.current is reactive
     display: flex;
     align-items: baseline;
     gap: 16px;
+  }
+
+  .icon-weights {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    width: 100%;
+  }
+
+  .icon-weight-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+  }
+
+  .icon-weight-glyphs {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-5);
+    min-width: 200px;
+  }
+
+  .icon-weight-row code {
+    min-width: 96px;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
   }
 
   .type-sample {

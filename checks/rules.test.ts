@@ -250,11 +250,208 @@ describe("hand-rolled components", () => {
     expect(findings[0]!.message).toContain("TableHeaderCell");
   });
 
+  describe("unsorted table header", () => {
+    const check = (markup: string) =>
+      checkSource(svelte(``, markup), "A.svelte", ["unsorted-table-header"]);
+
+    test("flags a labeled header that does not sort", () => {
+      const findings = check(`<Table>
+  {#snippet header()}
+    <TableHeaderCell label="Repo" sort={sorter} column="repo" />
+    <TableHeaderCell label="Status" />
+  {/snippet}
+</Table>`);
+      // Line 1 is the helper's <script> block.
+      expect(findings.map((f) => f.line)).toEqual([5]);
+      expect(findings[0]!.message).toContain("TableSort");
+    });
+
+    test("accepts TableSort, sortable, and headers with no visible text", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}
+    <TableHeaderCell class="col-pick"><span class="kit-sr-only">Select</span></TableHeaderCell>
+    <TableHeaderCell label="Repo" sort={sorter} column="repo" />
+    <TableHeaderCell
+      label="Cost"
+      numeric
+      sortable
+      sortDirection={dir("cost")}
+      onsort={() => by("cost")}
+    />
+    <TableHeaderCell />
+  {/snippet}
+</Table>`),
+      ).toEqual([]);
+    });
+
+    test("sortable={false} and custom header text still need sorting", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}
+    <TableHeaderCell label="Repo" sortable={false} />
+    <TableHeaderCell>{columnName}</TableHeaderCell>
+  {/snippet}
+</Table>`),
+      ).toHaveLength(2);
+    });
+
+    test("only a Table that opts out with unsorted may skip sorting", () => {
+      expect(
+        check(`<Table ariaLabel="Totals" unsorted>
+  {#snippet header()}<TableHeaderCell label="Kind" />{/snippet}
+</Table>
+<Table ariaLabel="Jobs">
+  {#snippet header()}<TableHeaderCell label="Job" />{/snippet}
+</Table>
+<Table ariaLabel="Runs" unsorted={false}>
+  {#snippet header()}<TableHeaderCell label="Run" />{/snippet}
+</Table>`).map((f) => f.line),
+      ).toEqual([6, 9]);
+    });
+
+    test("VirtualTable sorts like Table and opts out the same way", () => {
+      expect(
+        check(`<VirtualTable ariaLabel="Totals" items={rows} unsorted>
+  {#snippet header()}<TableHeaderCell label="Kind" />{/snippet}
+</VirtualTable>
+<VirtualTable ariaLabel="Jobs" items={rows}>
+  {#snippet header()}<TableHeaderCell label="Job" />{/snippet}
+</VirtualTable>`).map((f) => f.line),
+      ).toEqual([6]);
+    });
+
+    test("flags a raw th with text, but not an empty one or a commented-out one", () => {
+      expect(
+        check(`<table>
+  <thead><tr><th></th><th scope="col">Name</th></tr></thead>
+</table>
+<!-- <TableHeaderCell label="Old" /> -->`).map((f) => f.message),
+      ).toEqual([expect.stringContaining("cannot sort")]);
+    });
+
+    test("an ignore marker cannot suppress it; unsorted is the only exception", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}
+    <!-- kit-ui-check-ignore -->
+    <TableHeaderCell label="Repo" />
+  {/snippet}
+</Table>`),
+      ).toHaveLength(1);
+    });
+
+    test("a header holding only a control or screen-reader text needs no sort", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}
+    <TableHeaderCell>
+      <Checkbox
+        checked={all}
+        indeterminate={chosen.length > 0 && chosen.length < rows.length}
+        onchange={(on) => (chosen = on ? rows : [])}
+      />
+    </TableHeaderCell>
+    <TableHeaderCell>{#if editing}<span class="kit-sr-only">Actions</span>{/if}</TableHeaderCell>
+    <TableHeaderCell>
+      {#if selectable}
+        {@const all = chosen.length === rows.length}
+        <Checkbox checked={all} />
+      {/if}
+    </TableHeaderCell>
+  {/snippet}
+</Table>`),
+      ).toEqual([]);
+    });
+
+    // sortable comes after the >, so a tag cut short there loses it and
+    // the header is reported.
+    test("a > inside an attribute expression does not end the tag", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}
+    <TableHeaderCell class={rows.length > 1 ? "many" : "few"} sortable>Cost</TableHeaderCell>
+  {/snippet}
+</Table>`),
+      ).toEqual([]);
+    });
+
+    test("reads shorthand and spaced attributes", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}
+    <TableHeaderCell {sort} column="repo" label="Repo" />
+    <TableHeaderCell {sortable} label="Cost" />
+    <TableHeaderCell sort = {sorter} column="age" label="Age" />
+    <TableHeaderCell sortable = {false} label="Owner" />
+  {/snippet}
+</Table>
+<Table unsorted = {true}>
+  {#snippet header()}<TableHeaderCell label="Kind" />{/snippet}
+</Table>`).map((f) => f.line),
+      ).toEqual([7]);
+    });
+
+    test("row headers and an empty label need no sort", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}<TableHeaderCell label="" />{/snippet}
+  <tr><th scope="row">Alice</th><td>1</td></tr>
+  <tr><th scope='rowgroup'>Team</th></tr>
+</Table>`),
+      ).toEqual([]);
+    });
+
+    test("only the exact kit-sr-only class hides header text", () => {
+      expect(
+        check(`<Table>
+  {#snippet header()}
+    <TableHeaderCell><span class='kit-sr-only'>Actions</span></TableHeaderCell>
+    <TableHeaderCell><span class="kit-sr-only-label">Owner</span></TableHeaderCell>
+  {/snippet}
+</Table>`).map((f) => f.line),
+      ).toEqual([5]);
+    });
+  });
+
   test("tooltip: role=tooltip markup", () => {
     const src = svelte(``, `<div class="hint" role="tooltip">Adds 3, removes 1</div>`);
     const findings = checkSource(src, "A.svelte", ["hand-rolled-tooltip"]);
     expect(findings).toHaveLength(1);
     expect(findings[0]!.message).toContain("Tooltip");
+  });
+
+  test("disclosure: native details markup", () => {
+    const src = svelte(
+      ``,
+      `<details class="faq">\n  <summary>More</summary>\n  Body\n</details>\n<details open><summary>x</summary></details>`,
+    );
+    const findings = checkSource(src, "A.svelte", ["hand-rolled-disclosure"]);
+    expect(findings.map((f) => f.line)).toEqual([2, 6]);
+    expect(findings[0]!.message).toContain("Disclosure");
+  });
+
+  test("disclosure: does not match the component or similar tags", () => {
+    const src = svelte(
+      ``,
+      `<Disclosure title="More">Body</Disclosure>\n<details-panel></details-panel>\n<p>open the details</p>`,
+    );
+    expect(checkSource(src, "A.svelte", ["hand-rolled-disclosure"])).toHaveLength(0);
+  });
+
+  test("tabs: role=tablist markup", () => {
+    const src = svelte(
+      ``,
+      `<div class="detail-tabs" role="tablist">\n  <button role="tab" aria-selected="true">Files</button>\n</div>`,
+    );
+    const findings = checkSource(src, "A.svelte", ["hand-rolled-tabs"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.message).toContain("Tabs");
+  });
+
+  test("tabs: does not match the component", () => {
+    const src = svelte(``, `<Tabs tabs={items} bind:value ariaLabel="Detail" />`);
+    expect(checkSource(src, "A.svelte", ["hand-rolled-tabs"])).toHaveLength(0);
   });
 
   test("popover card: all three chrome declarations in one rule", () => {
@@ -379,9 +576,34 @@ describe("hand-rolled components", () => {
     expect(checkSource(src, "A.svelte", ["hand-rolled-empty-state"])).toHaveLength(2);
   });
 
+  test("empty state: a hand-rolled missing-data block", () => {
+    const src = svelte(
+      `.missing-data { text-align: center; }`,
+      `<div class="missing-data"><p>No pins</p></div>`,
+    );
+    const findings = checkSource(src, "A.svelte", ["hand-rolled-empty-state"]);
+    expect(findings).toHaveLength(2);
+    // One component replaces both names.
+    expect(findings[0]!.message).toContain("EmptyState");
+    expect(findings[0]!.message).not.toContain("MissingData");
+  });
+
   test("empty state: does not match kit-empty-state or prose", () => {
     const src = `<script>// the empty-state pattern</script>\n<div class="kit-empty-state"></div>`;
     expect(checkSource(src, "A.svelte", ["hand-rolled-empty-state"])).toHaveLength(0);
+  });
+
+  test("page header: page-header and page-heading classes and selectors", () => {
+    const src = svelte(
+      `.page-header { border-bottom: 1px solid var(--border-default); }`,
+      `<header class="page-header"><h1>Runs</h1></header><div class="toolbar page-heading">x</div>`,
+    );
+    expect(checkSource(src, "A.svelte", ["hand-rolled-page-header"])).toHaveLength(3);
+  });
+
+  test("page header: does not match kit-page-header, its parts, or prose", () => {
+    const src = `<script>// the page-header pattern</script>\n<header class="kit-page-header"><h1 class="kit-page-header__title">Runs</h1></header>`;
+    expect(checkSource(src, "A.svelte", ["hand-rolled-page-header"])).toHaveLength(0);
   });
 
   test("image preview: class and CSS selector, prefixed names included", () => {
@@ -395,6 +617,17 @@ describe("hand-rolled components", () => {
   test("image preview: does not match kit-image-preview", () => {
     const src = `<div class="kit-image-preview"></div>\n<style>.kit-image-preview { padding: 0; }</style>`;
     expect(checkSource(src, "A.svelte", ["hand-rolled-image-preview"])).toHaveLength(0);
+  });
+
+  test("video player: a <video> with native controls, on one line or several", () => {
+    const src = `<video src={url} controls></video>\n<video\n  src={url}\n  controls={true}\n  preload="metadata"\n></video>`;
+    const findings = checkSource(src, "A.svelte", ["hand-rolled-video-player"]);
+    expect(findings.map((finding) => finding.line)).toEqual([1, 2]);
+  });
+
+  test("video player: does not match a <video> without native controls", () => {
+    const src = `<video src={url} controls={false}></video>\n<video src={url} muted></video>\n<p>video controls</p>`;
+    expect(checkSource(src, "A.svelte", ["hand-rolled-video-player"])).toHaveLength(0);
   });
 
   test("lightbox: class attribute, className assignment, and CSS selector", () => {
@@ -527,7 +760,26 @@ describe("hand-rolled components", () => {
     const src = svelte(``, `<input type="date" /><input type="datetime-local" />`);
     const findings = checkSource(src, "A.svelte", ["hand-rolled-date-input"]);
     expect(findings).toHaveLength(2);
-    expect(findings[0]!.message).toContain("DateRangePicker");
+    expect(findings[0]!.message).toContain("DatePicker (one date)");
+  });
+
+  test("number input: native type=number in either quote style", () => {
+    const src = svelte(``, `<input type="number" min="0" />\n<input type='number' />`);
+    const findings = checkSource(src, "A.svelte", ["hand-rolled-number-input"]);
+    expect(findings.map((f) => f.line)).toEqual([2, 3]);
+    expect(findings[0]!.message).toContain("NumberInput");
+  });
+
+  test("number input: other input types and type props are not flagged", () => {
+    const src = svelte(``, `<input type="text" inputmode="numeric" /><Field type="numbers" />`);
+    expect(checkSource(src, "A.svelte", ["hand-rolled-number-input"])).toHaveLength(0);
+  });
+
+  test("color input: native type=color", () => {
+    const src = svelte(``, `<input type="color" value="#ff0000" /><input type="text" />`);
+    const findings = checkSource(src, "A.svelte", ["hand-rolled-color-input"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.message).toContain("ColorInput");
   });
 
   test("toast: classes including compounds like undo-toast", () => {
@@ -554,6 +806,7 @@ describe("hand-rolled components", () => {
     expect(findings).toHaveLength(3);
     expect(findings[0]!.message).toContain("DetailDrawer");
     expect(findings[0]!.message).toContain("BottomDock");
+    expect(findings[0]!.message).toContain("AppSidebar");
   });
 
   test("drawer: does not match kit-detail-drawer", () => {
@@ -580,6 +833,7 @@ describe("hand-rolled components", () => {
     const findings = checkSource(src, "A.svelte", ["hand-rolled-drawer"]);
     expect(findings).toHaveLength(5);
     expect(findings[0]!.message).toContain("BottomDock");
+    for (const finding of findings) expect(finding.message).toContain("AppSidebar");
   });
 
   test("drawer: generic dock names remain exempt", () => {
@@ -727,6 +981,16 @@ describe("typography rules", () => {
     expect(findings[0]!.message).toContain("var(--font-size-root)");
   });
 
+  test("pinned root: flags a qualified root and a root later in a list", () => {
+    const src = `:root.dark { font-size: 14px; }\n.a, html { font-size: 12px; }`;
+    expect(checkSource(src, "app.css", ["pinned-root-font-size"])).toHaveLength(2);
+  });
+
+  test("pinned root: ignores descendants styled under :root", () => {
+    const ok = `:root .kit-top-bar .kit-top-bar__tab { padding: 3px; font-size: 12.5px; }\nhtml.dark > .x { font-size: 12px; }`;
+    expect(checkSource(ok, "app.css", ["pinned-root-font-size"])).toHaveLength(0);
+  });
+
   test("pinned root: does not match class names containing html", () => {
     const ok = `.html-view { font-size: 12px; }`;
     expect(checkSource(ok, "app.css", ["pinned-root-font-size"])).toHaveLength(0);
@@ -847,6 +1111,42 @@ describe("chip-label-override", () => {
   test("ignores suffixed local classes like .kit-chip__label-wrapper", () => {
     const src = `.kit-chip__label-wrapper { display: flex; }\n`;
     expect(checkSource(src, "app.css", ["chip-label-override"])).toHaveLength(0);
+  });
+});
+
+describe("hand-rolled-radio", () => {
+  test("flags bare native radio markup", () => {
+    const src = svelte(``, `<label><input type="radio" name="size" value="s" /> Small</label>`);
+    const findings = checkSource(src, "A.svelte", ["hand-rolled-radio"]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.message).toContain("RadioGroup");
+  });
+
+  test("flags input[type=radio] selectors and radio-scoped accent-color", () => {
+    const src = svelte(
+      `input[type="radio"] { width: 14px; }
+      .radio-row input { accent-color: var(--accent-blue); }`,
+    );
+    expect(checkSource(src, "A.svelte", ["hand-rolled-radio"])).toHaveLength(2);
+  });
+
+  test("checkboxes and checkbox styling are left to the checkbox rule", () => {
+    const src = svelte(
+      `input[type="checkbox"] { width: 14px; }
+      .checkbox-row input { accent-color: var(--accent-blue); }`,
+      `<input type="checkbox" />`,
+    );
+    expect(checkSource(src, "A.svelte", ["hand-rolled-radio"])).toHaveLength(0);
+  });
+
+  test("<RadioGroup> usage with radio-named layout styling is clean", () => {
+    // Only accent-color makes a radio-named selector a styled native radio;
+    // spacing a RadioGroup must not flag.
+    const src = svelte(
+      `.settings :global(.kit-radio-group) { margin: 0; }`,
+      `<div class="settings"><RadioGroup legend="Size" options={sizes} bind:value={size} /></div>`,
+    );
+    expect(checkSource(src, "A.svelte", ["hand-rolled-radio"])).toHaveLength(0);
   });
 });
 
@@ -1184,6 +1484,106 @@ describe("split-handle-override", () => {
     const src = `/* kit-ui-check-ignore: our splitters are special */
 .layout .kit-split-resize-handle { width: 8px; }
 `;
+    expect(checkSource(src, "app.css", rule)).toHaveLength(1);
+  });
+});
+
+describe("rounded-side-stripe", () => {
+  const rule = ["rounded-side-stripe"];
+  const lines = (src: string) => checkSource(src, "app.css", rule).map((f) => f.line);
+
+  test.each([
+    "border-left: 3px solid var(--accent-amber);",
+    "border-inline-start: 0.25rem solid var(--accent-red);",
+    "border-right-width: thick;",
+    "box-shadow: inset 3px 0 0 var(--accent-blue);",
+    "box-shadow: var(--shadow-sm), inset -2px 0 0px var(--accent-blue);",
+  ])("flags %s on a rounded box", (declaration) => {
+    const src = svelte(`.notice {\n  border-radius: var(--radius-md);\n  ${declaration}\n}`);
+    const findings = checkSource(src, "A.svelte", rule);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.line).toBe(6);
+    expect(findings[0]!.message).toContain("radius: 0");
+  });
+
+  test("flags a stripe whose corners no rule for its selector squares", () => {
+    const src = `.card { &.failed { border-left: 3px solid var(--accent-red); } }
+@media (max-width: 640px) { .row { border-left-width: 4px; } }
+.other { border-radius: 0; }
+.item { border-left: 3px solid var(--accent-red); }
+`;
+    expect(lines(src)).toEqual([1, 2, 4]);
+  });
+
+  test("flags a stripe that squares only the opposite edge", () => {
+    const src = `.a { border-radius: 0 6px 6px 0; border-right: 3px solid var(--accent-red); }
+.b { border-start-start-radius: 0; border-left: 3px solid var(--accent-red); }
+.c { border-radius: 0; border-top-left-radius: 4px; border-left: 3px solid var(--accent-red); }
+`;
+    expect(lines(src)).toEqual([1, 2, 3]);
+  });
+
+  test("allows a stripe on a square edge", () => {
+    const src = `.a { border-radius: 0; border-left: 3px solid var(--accent-amber); }
+.b { border-radius: 0 6px 6px 0; border-left: 3px solid var(--accent-amber); }
+.c { border-start-start-radius: 0; border-end-start-radius: 0; box-shadow: inset 2px 0 0 var(--accent-blue); }
+.d { border-top-right-radius: 0; border-bottom-right-radius: 0; border-inline-end: 3px solid var(--accent-red); }
+.e { border-radius: 0 !important; border-left: 3px solid var(--accent-red); }
+.f { border-radius: 0 var(--radius, 6px) var(--radius, 6px) 0; border-left: 3px solid var(--accent-red); }
+`;
+    expect(lines(src)).toEqual([]);
+  });
+
+  test("counts square corners from any rule for the same selector", () => {
+    const src = `.view.current { border-start-start-radius: 0; border-end-start-radius: 0; box-shadow: inset 2px 0 0 var(--accent-blue); }
+@media (forced-colors: active) { .view.current { box-shadow: inset 2px 0 0 SelectedItemText; } }
+.a, .b { border-radius: 0; }
+.a { border-left: 3px solid var(--accent-red); }
+`;
+    expect(lines(src)).toEqual([]);
+  });
+
+  test("flags a selector list when any of its selectors has rounded corners", () => {
+    const src = `.a { border-radius: 0; }
+.a, .b { border-left: 3px solid var(--accent-red); }
+`;
+    expect(lines(src)).toEqual([2]);
+  });
+
+  test("reads a var() fallback as one radius", () => {
+    const src = `.c { border-radius: var(--radius, 0 0) 0; border-left: 3px solid var(--accent-red); }\n`;
+    expect(lines(src)).toEqual([1]);
+  });
+
+  test("allows a thick frame and flags a thicker side", () => {
+    const src = `.frame { border-radius: 24px; border: 6px solid var(--text-primary); }
+.frame2 { border-radius: 24px; border-width: 4px; }
+.side { border-radius: 24px; border-width: 1px 1px 1px 3px; }
+`;
+    expect(lines(src)).toEqual([3]);
+  });
+
+  test("counts a transparent stripe but not a border with no style", () => {
+    const src = `.a { border-radius: var(--radius-md); border-left: 3px solid transparent; }
+.b { border-radius: var(--radius-md); border-left: 3px none var(--accent-red); }
+.c { border-radius: var(--radius-md); border-left: 3px hidden; }
+`;
+    expect(lines(src)).toEqual([1]);
+  });
+
+  test("allows dividers, focus rings, and quotations", () => {
+    const src = svelte(
+      `.pane { border-left: 1px solid var(--border-default); }
+      .split { border-inline-start: var(--border-width) solid var(--border-muted); }
+      .row { border-left: 0; }
+      .chip { box-shadow: inset 0 0 0 1px var(--accent-blue); }
+      .md :global(blockquote) { border-left: 3px solid var(--border-default); }`,
+    );
+    expect(checkSource(src, "A.svelte", rule)).toHaveLength(0);
+  });
+
+  test("an ignore marker does not suppress it", () => {
+    const src = `/* kit-ui-check-ignore */\n.notice { border-left: 3px solid var(--accent-amber); }\n`;
     expect(checkSource(src, "app.css", rule)).toHaveLength(1);
   });
 });

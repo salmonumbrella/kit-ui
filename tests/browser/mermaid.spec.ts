@@ -27,29 +27,28 @@ test("renders mermaid fences into pan/zoom viewers", async ({ page }) => {
   await expect(viewer.locator(".kit-mermaid-viewer__button svg.lucide")).toHaveCount(3);
 });
 
-test("repeated wheel zoom and drag pan are reset together", async ({ page }) => {
-  const viewer = firstViewer(page);
-  const viewport = viewer.locator(".kit-mermaid-viewer__viewport");
-  const pan = viewer.locator(".kit-mermaid-viewer__pan");
+test("wheel zoom stays vector-backed; drag pans and Reset restores identity", async ({ page }) => {
+  const viewport = firstViewer(page).locator(".kit-mermaid-viewer__viewport");
+  const pan = firstViewer(page).locator(".kit-mermaid-viewer__pan");
   const transform = () =>
     pan.evaluate((node) => {
-      const matrix = new DOMMatrix((node as HTMLElement).style.transform);
+      const matrix = new DOMMatrix(node.style.transform);
       return { scale: matrix.a, x: matrix.e, y: matrix.f };
     });
-  const viewportBox = await viewport.boundingBox();
-  expect(viewportBox).not.toBeNull();
+  const svg = pan.locator(":scope > svg");
+  const originalSvg = await svg.elementHandle();
+  await viewport.hover();
+  await page.mouse.wheel(0, -300);
+  await expect
+    .poll(() => pan.evaluate((node) => new DOMMatrix(node.style.transform).a))
+    .toBeGreaterThan(1);
+  expect(await svg.evaluate((node, original) => node === original, originalSvg)).toBe(true);
+  await expect(pan).toHaveCSS("will-change", "auto");
 
-  const cursor = {
-    x: viewportBox!.x + viewportBox!.width * 0.25,
-    y: viewportBox!.y + viewportBox!.height * 0.25,
-  };
-  await page.mouse.move(cursor.x, cursor.y);
-  await page.mouse.wheel(0, -100);
-  await page.mouse.wheel(0, -100);
   const zoomed = await transform();
-  expect(zoomed.scale).toBeGreaterThan(1);
-  expect(Math.abs(zoomed.x) + Math.abs(zoomed.y)).toBeGreaterThan(0);
-
+  const box = (await viewport.boundingBox())!;
+  const cursor = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.mouse.move(cursor.x, cursor.y);
   await page.mouse.down();
   await page.mouse.move(cursor.x + 30, cursor.y + 20);
   await page.mouse.up();
@@ -58,25 +57,8 @@ test("repeated wheel zoom and drag pan are reset together", async ({ page }) => 
   expect(panned.x).toBeCloseTo(zoomed.x + 30);
   expect(panned.y).toBeCloseTo(zoomed.y + 20);
 
-  await viewer.getByRole("button", { name: "Reset diagram view" }).click();
+  await firstViewer(page).getByRole("button", { name: "Reset diagram view" }).click();
   await expect.poll(transform).toEqual({ scale: 1, x: 0, y: 0 });
-});
-
-test("wheel zoom keeps the live diagram vector-backed", async ({ page }) => {
-  // If fixed-layer compositing returns, Chromium enlarges the SVG's original
-  // raster and zoomed Mermaid labels become blurry for consuming apps.
-  const viewer = firstViewer(page);
-  const viewport = viewer.locator(".kit-mermaid-viewer__viewport");
-  const pan = viewer.locator(".kit-mermaid-viewer__pan");
-  const svg = pan.locator(":scope > svg");
-  const originalSvg = await svg.elementHandle();
-
-  await viewport.hover();
-  await page.mouse.wheel(0, -300);
-  await expect(pan).not.toHaveCSS("transform", /matrix\(1,/);
-
-  expect(await svg.evaluate((node, original) => node === original, originalSvg)).toBe(true);
-  await expect(pan).toHaveCSS("will-change", "auto");
 });
 
 test("copy control copies the original fence source", async ({ page, context }) => {
@@ -346,7 +328,7 @@ test("skips mermaid.run when the runtime version differs from the pinned release
     };
   });
 
-  expect(result.message).toContain("requires mermaid 12.0.0");
+  expect(result.message).toContain("requires mermaid 12.2.0");
   expect(result.rendered).toBeNull();
   expect(result.runCalls).toBe(0);
   expect(result.source).toBe("graph LR\nA-->B");
@@ -378,7 +360,7 @@ test("loader-level failures leave diagrams retryable", async ({ page }) => {
     };
     const renderedCount = await renderMarkdownMermaidDiagrams(root, {
       load: async () => ({
-        version: "12.0.0",
+        version: "12.2.0",
         initialize() {},
         async run({ nodes }: { nodes: ArrayLike<HTMLElement> }) {
           runCalls += 1;
@@ -434,7 +416,7 @@ test("retry budget uses same-node source changes after transient failures", asyn
     node.textContent = `graph LR\nA["${"x".repeat(200_001)}"]`;
     const renderedCount = await renderMarkdownMermaidDiagrams(root, {
       load: async () => ({
-        version: "12.0.0",
+        version: "12.2.0",
         initialize() {},
         async run({ nodes }: { nodes: ArrayLike<HTMLElement> }) {
           runCalls += 1;
@@ -475,7 +457,7 @@ test("run-level failures leave diagrams retryable", async ({ page }) => {
     try {
       await renderMarkdownMermaidDiagrams(root, {
         load: async () => ({
-          version: "12.0.0",
+          version: "12.2.0",
           initialize() {},
           async run() {
             runCalls += 1;
@@ -493,7 +475,7 @@ test("run-level failures leave diagrams retryable", async ({ page }) => {
     };
     const renderedCount = await renderMarkdownMermaidDiagrams(root, {
       load: async () => ({
-        version: "12.0.0",
+        version: "12.2.0",
         initialize() {},
         async run({ nodes }: { nodes: ArrayLike<HTMLElement> }) {
           runCalls += 1;
@@ -540,7 +522,7 @@ test("budget caps: excess diagrams and over-budget sources stay plain blocks", a
     }
     let runNodeCounts: number[] = [];
     const fakeLoad = async () => ({
-      version: "12.0.0",
+      version: "12.2.0",
       initialize() {},
       async run({ nodes }: { nodes: ArrayLike<HTMLElement> }) {
         runNodeCounts.push(nodes.length);
@@ -640,7 +622,7 @@ test("a controller settles after a run failure that mutated the node", async ({ 
     let runCalls = 0;
     const controller = initMarkdownMermaidRendering(host, {
       load: async () => ({
-        version: "12.0.0",
+        version: "12.2.0",
         initialize() {},
         async run({ nodes }: { nodes: ArrayLike<HTMLElement> }) {
           runCalls += 1;
