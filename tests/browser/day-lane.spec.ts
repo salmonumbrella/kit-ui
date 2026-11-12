@@ -66,6 +66,26 @@ test("a 23-hour day labels its hours from the app's ticks", async ({ page }) => 
   expect(labels.slice(0, 3)).toEqual(["12 AM", "1 AM", "3 AM"]);
 });
 
+test("by person: one card per lane, shared rows, sideways scroll", async ({ page }) => {
+  const lanes = page.getByTestId("day-lane-lanes");
+  const standup = lanes.getByRole("button", { name: /Shipment status standup/ });
+  await expect(standup).toHaveCount(4);
+  const tops = await Promise.all([0, 1].map(async (i) => (await standup.nth(i).boundingBox())!.y));
+  expect(tops[0]).toBe(tops[1]);
+  const [scrollWidth, clientWidth] = await lanes
+    .locator(".kit-day-lane")
+    .evaluate((el) => [el.scrollWidth, el.clientWidth]);
+  expect(scrollWidth).toBeGreaterThan(clientWidth);
+  // Headers sit over their lanes even without a global border-box reset.
+  await page.addStyleTag({ content: "*, *::before, *::after { box-sizing: content-box; }" });
+  const head = await lanes.locator(".kit-day-lane__lane-head").nth(1).boundingBox();
+  const column = await lanes.getByRole("group", { name: "Dev Rao" }).boundingBox();
+  expect(Math.abs(head!.x - column!.x)).toBeLessThanOrEqual(1);
+  await standup.first().click();
+  await expect(page.getByTestId("day-lane-lanes-event")).toHaveText("select standup");
+  for (let i = 0; i < 4; i++) await expect(standup.nth(i)).toHaveAttribute("aria-pressed", "true");
+});
+
 test("keyboard focus follows a fold as it opens and closes", async ({ page }) => {
   const fold = lane(page).getByRole("button", { name: /11:00 AM – 2:00 PM · 3 quiet hours/ });
   await fold.focus();
@@ -73,4 +93,17 @@ test("keyboard focus follows a fold as it opens and closes", async ({ page }) =>
   await expect(lane(page).getByRole("button", { name: "Fold 3 quiet hours" })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(fold).toBeFocused();
+});
+
+test("by person: lanes are named groups and focus clears the pinned headers", async ({ page }) => {
+  const lanes = page.getByTestId("day-lane-lanes");
+  const dev = lanes.getByRole("group", { name: "Dev Rao" });
+  await expect(dev.getByRole("button", { name: /Dock schedule week 11/ })).toHaveCount(1);
+  const scroller = lanes.locator(".kit-day-lane");
+  const card = dev.getByRole("button", { name: /Call: Jory and Dev/ });
+  await scroller.evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await card.focus();
+  const heads = await lanes.locator(".kit-day-lane__lane-heads").boundingBox();
+  const box = await card.boundingBox();
+  expect(box!.y).toBeGreaterThanOrEqual(heads!.y + heads!.height);
 });
